@@ -5,7 +5,6 @@ enum Ops {
   Plus,
   Minus,
   Dump,
-  Nop,
   Count,
 }
 
@@ -27,17 +26,13 @@ const dump = (): instruction => {
   return [Ops.Dump, null];
 };
 
-const nop = (): instruction => {
-  return [Ops.Nop, null];
-};
-
 const simulate = (program: instruction[]) => {
   let stack: any[] = [];
   let arg0: any;
   let arg1: any;
 
   for (const [op, ...args] of program) {
-    assert(Ops.Count == 5, "Exhastive handling of operations is expected");
+    assert(Ops.Count == 4, "Exhastive handling of operations is expected");
     switch (op) {
       case Ops.Push:
         stack.push(args[0]);
@@ -56,9 +51,6 @@ const simulate = (program: instruction[]) => {
         arg0 = stack.pop();
         console.log(arg0);
         break;
-      default:
-        assert(false, "Unreachable");
-        process.exit(1);
     }
   }
 };
@@ -104,7 +96,7 @@ const compile = async (program: instruction[], out: string) => {
   writer.write("_start:\n");
 
   for (const [op, ...args] of program) {
-    assert(Ops.Count == 5, "Exhastive handling of operations is expected");
+    assert(Ops.Count == 4, "Exhastive handling of operations is expected");
     switch (op) {
       case Ops.Push:
         writer.write("  ;;-- push " + args[0] + " --\n");
@@ -129,14 +121,6 @@ const compile = async (program: instruction[], out: string) => {
         writer.write("  pop rdi\n");
         writer.write("  call dump\n");
         break;
-      default:
-        assert(false, "Unreachable");
-        writer.end();
-        const rm = Bun.spawn({
-          cmd: ["rm", out + ".asm"],
-        });
-        await rm.exited;
-        process.exit(1);
     }
   }
 
@@ -166,8 +150,10 @@ const compile = async (program: instruction[], out: string) => {
   console.log(res.trim());
 };
 
-const parse_token_as_instruction = (token: string) => {
-  switch (token) {
+const parse_token_as_instruction = (
+  token: [string, number, number, string],
+) => {
+  switch (token[3]) {
     case ".":
       return dump();
     case "+":
@@ -175,20 +161,58 @@ const parse_token_as_instruction = (token: string) => {
     case "-":
       return minus();
     default:
-      if (token.match(/^[0-9]+$/)) {
-        return push(parseInt(token));
+      if (token[3].match(/^[0-9]+$/)) {
+        return push(parseInt(token[3]));
       } else {
-        return nop();
+        console.error(
+          `ERROR: Unknown token ${token[3]} at ${token[0]}:${token[1]}:${
+            token[2]
+          }`,
+        );
+        process.exit(1);
       }
   }
 };
 
 const load_program_from_file = async (path: string) => {
+  const lexed = await lex_file(path);
+  const program = lexed.map(parse_token_as_instruction);
+  return program;
+};
+
+const collect_cols = (
+  line: string,
+  col: number,
+  predicate: (c: string) => RegExpMatchArray | boolean | null,
+) => {
+  while (col < line.length && predicate(line[col])) {
+    col++;
+  }
+  return col;
+};
+
+const lex_line = (path: string, line_number: number, line: string) => {
+  let col = 0;
+  let start = 0;
+  let res: [string, number, number, string][] = [];
+  while (col < line.length) {
+    col = collect_cols(line, col, (c) => c.match(/\s/));
+    if (col >= line.length) break;
+    start = col;
+    col = collect_cols(line, col, (c) => !c.match(/\s/));
+    res.push([path, line_number, start, line.slice(start, col)]);
+  }
+  return res;
+};
+
+const lex_file = async (path: string) => {
   const file = Bun.file(path);
   const text = await file.text();
-  const tokens = text.trim().split(/\s+/);
-  const program = tokens.map(parse_token_as_instruction);
-  return program;
+  const lines = text.split("\n");
+  return lines.map((
+    line,
+    line_number,
+  ) => lex_line(path, line_number, line)).flat();
 };
 
 const usage = () => {

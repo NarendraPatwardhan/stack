@@ -7,6 +7,7 @@ enum Ops {
   Equal,
   Dump,
   If,
+  Else,
   End,
   Count,
 }
@@ -37,6 +38,10 @@ const if_ = (): instruction => {
   return [Ops.If, null];
 };
 
+const else_ = (): instruction => {
+  return [Ops.Else, null];
+};
+
 const end = (): instruction => {
   return [Ops.End, null];
 };
@@ -50,7 +55,7 @@ const simulate = (program: instruction[]) => {
   let i = 0;
   while (i < end) {
     assert(
-      Ops.Count == 7,
+      Ops.Count == 8,
       "Exhastive handling of operations is expected in simulate",
     );
     const [op, ...args] = program[i];
@@ -89,6 +94,9 @@ const simulate = (program: instruction[]) => {
         } else {
           i++;
         }
+        break;
+      case Ops.Else:
+        i = args[0];
         break;
       case Ops.End:
         i++;
@@ -142,7 +150,7 @@ const compile = async (program: instruction[], out: string) => {
   while (i < end) {
     const [op, ...args] = program[i];
     assert(
-      Ops.Count == 7,
+      Ops.Count == 8,
       "Exhastive handling of operations is expected in compile",
     );
     switch (op) {
@@ -183,6 +191,12 @@ const compile = async (program: instruction[], out: string) => {
         writer.write("  pop rax\n");
         writer.write("  test rax, rax\n");
         writer.write("  jz addr_" + args[0] + "\n");
+        i++;
+        break;
+      case Ops.Else:
+        writer.write("  ;;-- else --\n");
+        writer.write("  jmp addr_" + args[0] + "\n");
+        writer.write("addr_" + (i + 1) + ":\n");
         i++;
         break;
       case Ops.End:
@@ -230,11 +244,22 @@ const crossref = (program: instruction[]) => {
 
   for (const [i, [op, ...args]] of program.entries()) {
     assert(
-      Ops.Count == 7,
+      Ops.Count == 8,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
       case Ops.If:
+        stack.push(i);
+        break;
+      case Ops.Else:
+        let if_location = stack.pop();
+        if (if_location == undefined || program[if_location][0] != Ops.If) {
+          console.error(
+            `ERROR: Unmatched else at ${args[0]}:${args[1]}:${args[2]}`,
+          );
+          process.exit(1);
+        }
+        program[if_location][1] = i + 1;
         stack.push(i);
         break;
       case Ops.End:
@@ -245,7 +270,12 @@ const crossref = (program: instruction[]) => {
           );
           process.exit(1);
         }
-        program[start_location][1] = i;
+        if (
+          program[start_location][0] == Ops.If ||
+          program[start_location][0] == Ops.Else
+        ) {
+          program[start_location][1] = i;
+        }
         break;
     }
   }
@@ -274,6 +304,8 @@ const parse_token_as_instruction = (
       return equal();
     case "if":
       return if_();
+    case "else":
+      return else_();
     case "end":
       return end();
     default:

@@ -288,7 +288,9 @@ const compile = async (program: instruction[], out: string) => {
         break;
       case Ops.End:
         writer.write("  ;;-- end --\n");
-        writer.write("  jmp addr_" + args[0] + "\n");
+        if (i + 1 != args[0]) {
+          writer.write("  jmp addr_" + args[0] + "\n");
+        }
         i++;
         break;
       case Ops.Dup:
@@ -332,7 +334,10 @@ const compile = async (program: instruction[], out: string) => {
     cmd: [out],
   });
   const res = await new Response(prog.stdout).text();
-  console.log(res.trim());
+  const trimmed = res.trim();
+  if (trimmed != "") {
+    console.log(trimmed);
+  }
 };
 
 const crossref = (program: instruction[]) => {

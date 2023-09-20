@@ -1,10 +1,13 @@
-import { assert } from "console";
+import { assert, write } from "console";
 
 enum Ops {
   Push = 0,
   Plus,
   Minus,
+  Equal,
   Dump,
+  If,
+  End,
   Count,
 }
 
@@ -22,8 +25,20 @@ const minus = (): instruction => {
   return [Ops.Minus, null];
 };
 
+const equal = (): instruction => {
+  return [Ops.Equal, null];
+};
+
 const dump = (): instruction => {
   return [Ops.Dump, null];
+};
+
+const if_ = (): instruction => {
+  return [Ops.If, null];
+};
+
+const end = (): instruction => {
+  return [Ops.End, null];
 };
 
 const simulate = (program: instruction[]) => {
@@ -31,25 +46,52 @@ const simulate = (program: instruction[]) => {
   let arg0: any;
   let arg1: any;
 
-  for (const [op, ...args] of program) {
-    assert(Ops.Count == 4, "Exhastive handling of operations is expected");
+  const end = program.length;
+  let i = 0;
+  while (i < end) {
+    assert(
+      Ops.Count == 7,
+      "Exhastive handling of operations is expected in simulate",
+    );
+    const [op, ...args] = program[i];
     switch (op) {
       case Ops.Push:
         stack.push(args[0]);
+        i++;
         break;
       case Ops.Plus:
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg0 + arg1);
+        i++;
         break;
       case Ops.Minus:
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg1 - arg0);
+        i++;
+        break;
+      case Ops.Equal:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push((arg0 == arg1) ? 1 : 0);
+        i++;
         break;
       case Ops.Dump:
         arg0 = stack.pop();
         console.log(arg0);
+        i++;
+        break;
+      case Ops.If:
+        arg0 = stack.pop();
+        if (arg0 == 0) {
+          i = args[0];
+        } else {
+          i++;
+        }
+        break;
+      case Ops.End:
+        i++;
         break;
     }
   }
@@ -95,12 +137,19 @@ const compile = async (program: instruction[], out: string) => {
   writer.write("global _start\n");
   writer.write("_start:\n");
 
-  for (const [op, ...args] of program) {
-    assert(Ops.Count == 4, "Exhastive handling of operations is expected");
+  const end = program.length;
+  let i = 0;
+  while (i < end) {
+    const [op, ...args] = program[i];
+    assert(
+      Ops.Count == 7,
+      "Exhastive handling of operations is expected in compile",
+    );
     switch (op) {
       case Ops.Push:
         writer.write("  ;;-- push " + args[0] + " --\n");
         writer.write("  push " + args[0] + "\n");
+        i++;
         break;
       case Ops.Plus:
         writer.write("  ;;-- plus --\n");
@@ -108,6 +157,7 @@ const compile = async (program: instruction[], out: string) => {
         writer.write("  pop rbx\n");
         writer.write("  add rax, rbx\n");
         writer.write("  push rax\n");
+        i++;
         break;
       case Ops.Minus:
         writer.write("  ;;-- minus --\n");
@@ -115,11 +165,36 @@ const compile = async (program: instruction[], out: string) => {
         writer.write("  pop rbx\n");
         writer.write("  sub rbx, rax\n");
         writer.write("  push rbx\n");
+        i++;
+        break;
+      case Ops.Equal:
+        writer.write("  ;;-- equal --\n");
+        writer.write("  mov rcx, 0\n");
+        writer.write("  mov rdx, 1\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  cmp rax, rbx\n");
+        writer.write("  cmove rcx, rdx\n");
+        writer.write("  push rcx\n");
+        i++;
+        break;
+      case Ops.If:
+        writer.write("  ;;-- if --\n");
+        writer.write("  pop rax\n");
+        writer.write("  test rax, rax\n");
+        writer.write("  jz addr_" + args[0] + "\n");
+        i++;
+        break;
+      case Ops.End:
+        writer.write("  ;;-- end --\n");
+        writer.write("addr_" + i + ":\n");
+        i++;
         break;
       case Ops.Dump:
         writer.write("  ;;-- dump --\n");
         writer.write("  pop rdi\n");
         writer.write("  call dump\n");
+        i++;
         break;
     }
   }
@@ -150,6 +225,41 @@ const compile = async (program: instruction[], out: string) => {
   console.log(res.trim());
 };
 
+const crossref = (program: instruction[]) => {
+  let stack = [];
+
+  for (const [i, [op, ...args]] of program.entries()) {
+    assert(
+      Ops.Count == 7,
+      "Exhastive handling of operations is expected in crossref",
+    );
+    switch (op) {
+      case Ops.If:
+        stack.push(i);
+        break;
+      case Ops.End:
+        let start_location = stack.pop();
+        if (start_location == undefined) {
+          console.error(
+            `ERROR: Unmatched end at ${args[0]}:${args[1]}:${args[2]}`,
+          );
+          process.exit(1);
+        }
+        program[start_location][1] = i;
+        break;
+    }
+  }
+
+  if (stack.length > 0) {
+    console.error(
+      "ERROR: One or more blocks are not closed with end instructions",
+    );
+    process.exit(1);
+  }
+
+  return program;
+};
+
 const parse_token_as_instruction = (
   token: [string, number, number, string],
 ) => {
@@ -160,6 +270,12 @@ const parse_token_as_instruction = (
       return plus();
     case "-":
       return minus();
+    case "=":
+      return equal();
+    case "if":
+      return if_();
+    case "end":
+      return end();
     default:
       if (token[3].match(/^[0-9]+$/)) {
         return push(parseInt(token[3]));
@@ -177,7 +293,7 @@ const parse_token_as_instruction = (
 const load_program_from_file = async (path: string) => {
   const lexed = await lex_file(path);
   const program = lexed.map(parse_token_as_instruction);
-  return program;
+  return crossref(program);
 };
 
 const collect_cols = (

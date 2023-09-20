@@ -1,4 +1,4 @@
-import { assert, write } from "console";
+import { assert } from "console";
 
 enum Ops {
   Push = 0,
@@ -10,6 +10,8 @@ enum Ops {
   Dump,
   If,
   Else,
+  While,
+  Do,
   End,
   Dup,
   Count,
@@ -53,6 +55,14 @@ const else_ = (): instruction => {
   return [Ops.Else, null];
 };
 
+const while_ = (): instruction => {
+  return [Ops.While, null];
+};
+
+const do_ = (): instruction => {
+  return [Ops.Do, null];
+};
+
 const end = (): instruction => {
   return [Ops.End, null];
 };
@@ -66,11 +76,10 @@ const simulate = (program: instruction[]) => {
   let arg0: any;
   let arg1: any;
 
-  const end = program.length;
   let i = 0;
-  while (i < end) {
+  while (i < program.length) {
     assert(
-      Ops.Count == 11,
+      Ops.Count == 13,
       "Exhastive handling of operations is expected in simulate",
     );
     const [op, ...args] = program[i];
@@ -125,8 +134,20 @@ const simulate = (program: instruction[]) => {
       case Ops.Else:
         i = args[0];
         break;
-      case Ops.End:
+      case Ops.While:
         i++;
+        break;
+      case Ops.Do:
+        arg0 = stack.pop();
+        if (arg0 == 0) {
+          i = args[0];
+        } else {
+          i++;
+        }
+        break;
+
+      case Ops.End:
+        i = args[0];
         break;
       case Ops.Dup:
         arg0 = stack.pop();
@@ -183,9 +204,10 @@ const compile = async (program: instruction[], out: string) => {
   while (i < end) {
     const [op, ...args] = program[i];
     assert(
-      Ops.Count == 11,
+      Ops.Count == 13,
       "Exhastive handling of operations is expected in compile",
     );
+    writer.write("addr_" + i + ":\n");
     switch (op) {
       case Ops.Push:
         writer.write("  ;;-- push " + args[0] + " --\n");
@@ -251,12 +273,22 @@ const compile = async (program: instruction[], out: string) => {
       case Ops.Else:
         writer.write("  ;;-- else --\n");
         writer.write("  jmp addr_" + args[0] + "\n");
-        writer.write("addr_" + (i + 1) + ":\n");
+        i++;
+        break;
+      case Ops.While:
+        writer.write("  ;;-- while --\n");
+        i++;
+        break;
+      case Ops.Do:
+        writer.write("  ;;-- do --\n");
+        writer.write("  pop rax\n");
+        writer.write("  test rax, rax\n");
+        writer.write("  jz addr_" + args[0] + "\n");
         i++;
         break;
       case Ops.End:
         writer.write("  ;;-- end --\n");
-        writer.write("addr_" + i + ":\n");
+        writer.write("  jmp addr_" + args[0] + "\n");
         i++;
         break;
       case Ops.Dup:
@@ -275,6 +307,8 @@ const compile = async (program: instruction[], out: string) => {
     }
   }
 
+  writer.write("  ;;-- exit --\n");
+  writer.write("addr_" + i + ":\n");
   writer.write("  mov rax, 60\n");
   writer.write("  mov rdi, 0\n");
   writer.write("  syscall\n");
@@ -303,10 +337,11 @@ const compile = async (program: instruction[], out: string) => {
 
 const crossref = (program: instruction[]) => {
   let stack = [];
+  let start_location: number | undefined;
 
   for (const [i, [op, ...args]] of program.entries()) {
     assert(
-      Ops.Count == 11,
+      Ops.Count == 13,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
@@ -324,8 +359,25 @@ const crossref = (program: instruction[]) => {
         program[if_location][1] = i + 1;
         stack.push(i);
         break;
+      case Ops.While:
+        stack.push(i);
+        break;
+      case Ops.Do:
+        start_location = stack.pop();
+        if (
+          start_location == undefined ||
+          program[start_location][0] != Ops.While
+        ) {
+          console.error(
+            `ERROR: Unmatched do at ${args[0]}:${args[1]}:${args[2]}`,
+          );
+          process.exit(1);
+        }
+        program[i][1] = start_location;
+        stack.push(i);
+        break;
       case Ops.End:
-        let start_location = stack.pop();
+        start_location = stack.pop();
         if (start_location == undefined) {
           console.error(
             `ERROR: Unmatched end at ${args[0]}:${args[1]}:${args[2]}`,
@@ -337,6 +389,10 @@ const crossref = (program: instruction[]) => {
           program[start_location][0] == Ops.Else
         ) {
           program[start_location][1] = i;
+          program[i][1] = i + 1;
+        } else if (program[start_location][0] == Ops.Do) {
+          program[i][1] = program[start_location][1];
+          program[start_location][1] = i + 1;
         }
         break;
     }
@@ -355,6 +411,11 @@ const crossref = (program: instruction[]) => {
 const parse_token_as_instruction = (
   token: [string, number, number, string],
 ) => {
+  assert(
+    Ops.Count == 13,
+    "Exhastive handling of operations is expected in parsing tokens",
+  );
+
   switch (token[3]) {
     case ".":
       return dump();
@@ -372,6 +433,10 @@ const parse_token_as_instruction = (
       return if_();
     case "else":
       return else_();
+    case "while":
+      return while_();
+    case "do":
+      return do_();
     case "end":
       return end();
     case "dup":

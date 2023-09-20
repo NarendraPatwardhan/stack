@@ -5,6 +5,7 @@ enum Ops {
   Plus,
   Minus,
   Dump,
+  Nop,
   Count,
 }
 
@@ -26,13 +27,17 @@ const dump = (): instruction => {
   return [Ops.Dump, null];
 };
 
+const nop = (): instruction => {
+  return [Ops.Nop, null];
+};
+
 const simulate = (program: instruction[]) => {
   let stack: any[] = [];
   let arg0: any;
   let arg1: any;
 
   for (const [op, ...args] of program) {
-    assert(Ops.Count == 4, "Exhastive handling of operations is expected");
+    assert(Ops.Count == 5, "Exhastive handling of operations is expected");
     switch (op) {
       case Ops.Push:
         stack.push(args[0]);
@@ -53,6 +58,7 @@ const simulate = (program: instruction[]) => {
         break;
       default:
         assert(false, "Unreachable");
+        process.exit(1);
     }
   }
 };
@@ -98,7 +104,7 @@ const compile = async (program: instruction[], out: string) => {
   writer.write("_start:\n");
 
   for (const [op, ...args] of program) {
-    assert(Ops.Count == 4, "Exhastive handling of operations is expected");
+    assert(Ops.Count == 5, "Exhastive handling of operations is expected");
     switch (op) {
       case Ops.Push:
         writer.write("  ;;-- push " + args[0] + " --\n");
@@ -125,6 +131,12 @@ const compile = async (program: instruction[], out: string) => {
         break;
       default:
         assert(false, "Unreachable");
+        writer.end();
+        const rm = Bun.spawn({
+          cmd: ["rm", out + ".asm"],
+        });
+        await rm.exited;
+        process.exit(1);
     }
   }
 
@@ -166,7 +178,7 @@ const parse_token_as_instruction = (token: string) => {
       if (token.match(/^[0-9]+$/)) {
         return push(parseInt(token));
       } else {
-        assert(false, "Unknown token: " + token);
+        return nop();
       }
   }
 };

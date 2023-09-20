@@ -5,10 +5,13 @@ enum Ops {
   Plus,
   Minus,
   Equal,
+  Gt,
+  Lt,
   Dump,
   If,
   Else,
   End,
+  Dup,
   Count,
 }
 
@@ -30,6 +33,14 @@ const equal = (): instruction => {
   return [Ops.Equal, null];
 };
 
+const gt = (): instruction => {
+  return [Ops.Gt, null];
+};
+
+const lt = (): instruction => {
+  return [Ops.Lt, null];
+};
+
 const dump = (): instruction => {
   return [Ops.Dump, null];
 };
@@ -46,6 +57,10 @@ const end = (): instruction => {
   return [Ops.End, null];
 };
 
+const dup = (): instruction => {
+  return [Ops.Dup, null];
+};
+
 const simulate = (program: instruction[]) => {
   let stack: any[] = [];
   let arg0: any;
@@ -55,7 +70,7 @@ const simulate = (program: instruction[]) => {
   let i = 0;
   while (i < end) {
     assert(
-      Ops.Count == 8,
+      Ops.Count == 11,
       "Exhastive handling of operations is expected in simulate",
     );
     const [op, ...args] = program[i];
@@ -82,6 +97,18 @@ const simulate = (program: instruction[]) => {
         stack.push((arg0 == arg1) ? 1 : 0);
         i++;
         break;
+      case Ops.Gt:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push((arg1 > arg0) ? 1 : 0);
+        i++;
+        break;
+      case Ops.Lt:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push((arg1 < arg0) ? 1 : 0);
+        i++;
+        break;
       case Ops.Dump:
         arg0 = stack.pop();
         console.log(arg0);
@@ -99,6 +126,12 @@ const simulate = (program: instruction[]) => {
         i = args[0];
         break;
       case Ops.End:
+        i++;
+        break;
+      case Ops.Dup:
+        arg0 = stack.pop();
+        stack.push(arg0);
+        stack.push(arg0);
         i++;
         break;
     }
@@ -150,7 +183,7 @@ const compile = async (program: instruction[], out: string) => {
   while (i < end) {
     const [op, ...args] = program[i];
     assert(
-      Ops.Count == 8,
+      Ops.Count == 11,
       "Exhastive handling of operations is expected in compile",
     );
     switch (op) {
@@ -181,8 +214,30 @@ const compile = async (program: instruction[], out: string) => {
         writer.write("  mov rdx, 1\n");
         writer.write("  pop rax\n");
         writer.write("  pop rbx\n");
-        writer.write("  cmp rax, rbx\n");
+        writer.write("  cmp rbx, rax\n");
         writer.write("  cmove rcx, rdx\n");
+        writer.write("  push rcx\n");
+        i++;
+        break;
+      case Ops.Gt:
+        writer.write("  ;;-- gt --\n");
+        writer.write("  mov rcx, 0\n");
+        writer.write("  mov rdx, 1\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  cmp rbx, rax\n");
+        writer.write("  cmovg rcx, rdx\n");
+        writer.write("  push rcx\n");
+        i++;
+        break;
+      case Ops.Lt:
+        writer.write("  ;;-- lt --\n");
+        writer.write("  mov rcx, 0\n");
+        writer.write("  mov rdx, 1\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  cmp rbx, rax\n");
+        writer.write("  cmovl rcx, rdx\n");
         writer.write("  push rcx\n");
         i++;
         break;
@@ -202,6 +257,13 @@ const compile = async (program: instruction[], out: string) => {
       case Ops.End:
         writer.write("  ;;-- end --\n");
         writer.write("addr_" + i + ":\n");
+        i++;
+        break;
+      case Ops.Dup:
+        writer.write("  ;;-- dup --\n");
+        writer.write("  pop rax\n");
+        writer.write("  push rax\n");
+        writer.write("  push rax\n");
         i++;
         break;
       case Ops.Dump:
@@ -244,7 +306,7 @@ const crossref = (program: instruction[]) => {
 
   for (const [i, [op, ...args]] of program.entries()) {
     assert(
-      Ops.Count == 8,
+      Ops.Count == 11,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
@@ -302,12 +364,18 @@ const parse_token_as_instruction = (
       return minus();
     case "=":
       return equal();
+    case ">":
+      return gt();
+    case "<":
+      return lt();
     case "if":
       return if_();
     case "else":
       return else_();
     case "end":
       return end();
+    case "dup":
+      return dup();
     default:
       if (token[3].match(/^[0-9]+$/)) {
         return push(parseInt(token[3]));
@@ -393,7 +461,7 @@ const main = async () => {
     const program = await load_program_from_file(file);
     simulate(program);
   } else if (subcmd == "com") {
-    let out: string = "out";
+    let out: string = "./build/out";
     if (argc > 4) out = argv[4];
     const program = await load_program_from_file(file);
     await compile(program, out);

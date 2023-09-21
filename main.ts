@@ -58,13 +58,14 @@ interface Instruction {
 
 const simulate = (program: Instruction[], runOpts: RunOptions) => {
   let stack: any[] = [];
+  let mem: UInt8Array = new Uint8Array(runOpts.memCap);
   let arg0: any;
   let arg1: any;
 
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 14,
+      Op.Count == 16,
       "Exhastive handling of operations is expected in simulate",
     );
     const { op, ...rest } = program[i];
@@ -140,7 +141,18 @@ const simulate = (program: Instruction[], runOpts: RunOptions) => {
         i++;
         break;
       case Op.Mem:
-        assert(false, "ERROR: Mem operation is not supported in simulation");
+        stack.push(0);
+        i++;
+        break;
+      case Op.Load:
+        arg0 = stack.pop();
+        stack.push(mem[arg0]);
+        i++;
+        break;
+      case Op.Store:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        mem[arg1] = arg0 % 255;
         i++;
         break;
     }

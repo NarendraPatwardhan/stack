@@ -14,6 +14,7 @@ enum Op {
   Do,
   End,
   Dup,
+  Mem,
   Count,
 }
 
@@ -30,6 +31,7 @@ const strToOp: Record<string, Op> = {
   "do": Op.Do,
   "end": Op.End,
   "dup": Op.Dup,
+  "mem": Op.Mem,
 };
 
 interface Loc {
@@ -50,7 +52,7 @@ interface Instruction {
   jump?: number;
 }
 
-const simulate = (program: Instruction[]) => {
+const simulate = (program: Instruction[], runOpts: RunOptions) => {
   let stack: any[] = [];
   let arg0: any;
   let arg1: any;
@@ -137,8 +139,11 @@ const simulate = (program: Instruction[]) => {
   }
 };
 
-const compile = async (program: Instruction[], out: string) => {
-  const file = Bun.file(out + ".asm");
+const compile = async (
+  program: Instruction[],
+  runOpts: RunOptions,
+) => {
+  const file = Bun.file(runOpts.outPrefix + ".asm");
   const writer = file.writer();
   writer.write("segment .text\n");
   writer.write("dump:\n");
@@ -182,7 +187,7 @@ const compile = async (program: Instruction[], out: string) => {
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 13,
+      Op.Count == 14,
       "Exhastive handling of operations is expected in compile",
     );
     writer.write("addr_" + i + ":\n");
@@ -284,6 +289,11 @@ const compile = async (program: Instruction[], out: string) => {
         writer.write("  call dump\n");
         i++;
         break;
+      case Op.Mem:
+        writer.write("  ;;-- mem --\n");
+        writer.write("  push mem\n");
+        i++;
+        break;
     }
   }
 
@@ -293,23 +303,28 @@ const compile = async (program: Instruction[], out: string) => {
   writer.write("  mov rdi, 0\n");
   writer.write("  syscall\n");
 
+  writer.write("segment .bss\n");
+  writer.write("mem resb " + runOpts.memCap + "\n");
+
   writer.end();
-  console.log("CMD: nasm -felf64 " + out + ".asm");
+  console.log("CMD: nasm -felf64 " + runOpts.outPrefix + ".asm");
   const nasm = Bun.spawn({
-    cmd: ["nasm", "-felf64", out + ".asm"],
+    cmd: ["nasm", "-felf64", runOpts.outPrefix + ".asm"],
   });
   await nasm.exited;
 
-  console.log("CMD: ld -o " + out + " " + out + ".o");
+  console.log(
+    "CMD: ld -o " + runOpts.outPrefix + " " + runOpts.outPrefix + ".o",
+  );
   const link = Bun.spawn({
-    cmd: ["ld", "-o", out, out + ".o"],
+    cmd: ["ld", "-o", runOpts.outPrefix, runOpts.outPrefix + ".o"],
   });
 
   await link.exited;
 
-  console.log("CMD:" + out);
+  console.log("CMD:" + runOpts.outPrefix);
   const prog = Bun.spawn({
-    cmd: [out],
+    cmd: [runOpts.outPrefix],
   });
   const res = await new Response(prog.stdout).text();
   const trimmed = res.trim();
@@ -324,7 +339,7 @@ const crossRef = (program: Instruction[]) => {
 
   for (const [i, { op, ...rest }] of program.entries()) {
     assert(
-      Op.Count == 13,
+      Op.Count == 14,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
@@ -395,7 +410,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 13,
+    Op.Count == 14,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 
@@ -470,7 +485,12 @@ const usage = () => {
   console.log("   com <file> [out]      Compile the program");
 };
 
-const main = async () => {
+interface RunOptions {
+  outPrefix: string;
+  memCap: number;
+}
+
+const main = async (runOpts: RunOptions) => {
   const argc = Bun.argv.length;
   const argv = Bun.argv;
   if (argc < 3) {
@@ -491,12 +511,10 @@ const main = async () => {
 
   if (subcmd == "sim") {
     const program = await loadProgramFromFile(file);
-    simulate(program);
+    simulate(program, runOpts);
   } else if (subcmd == "com") {
-    let out: string = "./build/out";
-    if (argc > 4) out = argv[4];
     const program = await loadProgramFromFile(file);
-    await compile(program, out);
+    await compile(program, runOpts);
   } else {
     usage();
     console.error(`Unknown subcommand: ${subcmd}`);
@@ -504,4 +522,9 @@ const main = async () => {
   }
 };
 
-await main();
+await main(
+  {
+    outPrefix: "./build/out",
+    memCap: 64 * 1024, // 64KB
+  },
+);

@@ -57,7 +57,7 @@ interface Instruction {
   jump?: number;
 }
 
-const sysCall = (num: number, args: any[], mem: Uint8Array) => {
+const sysCall = async (num: number, args: any[], mem: Uint8Array) => {
   switch (num) {
     case 1: // write
       const fd = args[0];
@@ -66,10 +66,10 @@ const sysCall = (num: number, args: any[], mem: Uint8Array) => {
       const str = new TextDecoder().decode(mem.slice(buf, buf + count));
       switch (fd) {
         case 1:
-          console.log(str);
+          await Bun.write(Bun.stdout, str);
           break;
         case 2:
-          console.error(str);
+          await Bun.write(Bun.stderr, str);
           break;
         default:
           console.error(
@@ -86,7 +86,7 @@ const sysCall = (num: number, args: any[], mem: Uint8Array) => {
   }
 };
 
-const simulate = (program: Instruction[], runOpts: RunOptions) => {
+const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let stack: any[] = [];
   let mem: Uint8Array = new Uint8Array(runOpts.memCap);
   let arg0: any;
@@ -94,6 +94,9 @@ const simulate = (program: Instruction[], runOpts: RunOptions) => {
 
   let syscallNum: number;
   let syscallArgs: any[] = [];
+
+  let stdoutUsed = false;
+  let stderrUsed = false;
 
   let i = 0;
   while (i < program.length) {
@@ -194,9 +197,22 @@ const simulate = (program: Instruction[], runOpts: RunOptions) => {
           syscallArgs.push(stack.pop());
         }
         sysCall(syscallNum, syscallArgs, mem);
+        if (syscallNum == 1 && syscallArgs[0] == 1) {
+          stdoutUsed = true;
+        }
+        if (syscallNum == 1 && syscallArgs[0] == 2) {
+          stderrUsed = true;
+        }
         i++;
         break;
     }
+  }
+
+  if (stdoutUsed) {
+    await Bun.write(Bun.stdout, "\n");
+  }
+  if (stderrUsed) {
+    await Bun.write(Bun.stderr, "\n");
   }
 };
 
@@ -603,7 +619,7 @@ const main = async (runOpts: RunOptions) => {
 
   if (subcmd == "sim") {
     const program = await loadProgramFromFile(file);
-    simulate(program, runOpts);
+    await simulate(program, runOpts);
   } else if (subcmd == "com") {
     const program = await loadProgramFromFile(file);
     await compile(program, runOpts);

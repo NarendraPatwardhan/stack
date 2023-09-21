@@ -152,7 +152,7 @@ const simulate = (program: Instruction[], runOpts: RunOptions) => {
       case Op.Store:
         arg0 = stack.pop();
         arg1 = stack.pop();
-        mem[arg1] = arg0 % 255;
+        mem[arg1] = arg0 & 0xFF;
         i++;
         break;
     }

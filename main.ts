@@ -494,7 +494,7 @@ const lex_line = (path: string, line_number: number, line: string) => {
 const lex_file = async (path: string) => {
   const file = Bun.file(path);
   const text = await file.text();
-  const lines = text.split("\n");
+  const lines = text.split("\n").map((line) => line.split("//")[0]);
   return lines.map((
     line,
     line_number,

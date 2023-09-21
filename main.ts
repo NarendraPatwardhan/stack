@@ -17,6 +17,7 @@ enum Op {
   Mem,
   Load,
   Store,
+  Syscall,
   Count,
 }
 
@@ -58,7 +59,7 @@ interface Instruction {
 
 const simulate = (program: Instruction[], runOpts: RunOptions) => {
   let stack: any[] = [];
-  let mem: UInt8Array = new Uint8Array(runOpts.memCap);
+  let mem: Uint8Array = new Uint8Array(runOpts.memCap);
   let arg0: any;
   let arg1: any;
 
@@ -77,7 +78,7 @@ const simulate = (program: Instruction[], runOpts: RunOptions) => {
       case Op.Plus:
         arg0 = stack.pop();
         arg1 = stack.pop();
-        stack.push(arg0 + arg1);
+        stack.push(arg1 + arg0);
         i++;
         break;
       case Op.Minus:
@@ -89,7 +90,7 @@ const simulate = (program: Instruction[], runOpts: RunOptions) => {
       case Op.Equal:
         arg0 = stack.pop();
         arg1 = stack.pop();
-        stack.push((arg0 == arg1) ? 1 : 0);
+        stack.push((arg1 == arg0) ? 1 : 0);
         i++;
         break;
       case Op.Gt:
@@ -163,6 +164,8 @@ const compile = async (
   program: Instruction[],
   runOpts: RunOptions,
 ) => {
+  const syscallLocs = ["rdi", "rsi", "rdx", "r10", "r8", "r9"];
+
   const file = Bun.file(runOpts.outPrefix + ".asm");
   const writer = file.writer();
   writer.write("segment .text\n");
@@ -207,7 +210,7 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 16,
+      Op.Count == 17,
       "Exhastive handling of operations is expected in compile",
     );
     writer.write("addr_" + i + ":\n");
@@ -329,6 +332,15 @@ const compile = async (
         writer.write("  mov [rax], bl\n");
         i++;
         break;
+      case Op.Syscall:
+        writer.write("  ;;-- syscall " + rest.value + " --\n");
+        writer.write("  pop rax\n");
+        for (let j = 0; j < rest.value; j++) {
+          writer.write("  pop " + syscallLocs[j] + "\n");
+        }
+        writer.write("  syscall\n");
+        i++;
+        break;
     }
   }
 
@@ -374,7 +386,7 @@ const crossRef = (program: Instruction[]) => {
 
   for (const [i, { op, ...rest }] of program.entries()) {
     assert(
-      Op.Count == 16,
+      Op.Count == 17,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
@@ -445,7 +457,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 16,
+    Op.Count == 17,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 
@@ -457,12 +469,17 @@ const parseTokenAsIntruction = (
 
   if (text.match(/^[0-9]+$/)) {
     return { op: Op.Push, loc, value: parseInt(text) };
-  } else {
-    console.error(
-      `ERROR: Unknown token ${text} at ${loc.path}:${loc.row}:${loc.col}`,
-    );
-    process.exit(1);
   }
+
+  const syscallMatch = text.match(/^syscall\(([1-6]+)\)$/);
+  if (syscallMatch) {
+    return { op: Op.Syscall, loc, value: parseInt(syscallMatch[1]) };
+  }
+
+  console.error(
+    `ERROR: Unknown token ${text} at ${loc.path}:${loc.row}:${loc.col}`,
+  );
+  process.exit(1);
 };
 
 const collectCols = (

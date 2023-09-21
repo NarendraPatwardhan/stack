@@ -15,6 +15,8 @@ enum Op {
   End,
   Dup,
   Mem,
+  Load,
+  Store,
   Count,
 }
 
@@ -32,6 +34,8 @@ const strToOp: Record<string, Op> = {
   "end": Op.End,
   "dup": Op.Dup,
   "mem": Op.Mem,
+  ",": Op.Load,
+  ".": Op.Store,
 };
 
 interface Loc {
@@ -191,7 +195,7 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 14,
+      Op.Count == 16,
       "Exhastive handling of operations is expected in compile",
     );
     writer.write("addr_" + i + ":\n");
@@ -298,6 +302,21 @@ const compile = async (
         writer.write("  push mem\n");
         i++;
         break;
+      case Op.Load:
+        writer.write("  ;;-- load --\n");
+        writer.write("  pop rax\n");
+        writer.write("  xor rbx, rbx\n");
+        writer.write("  mov bl, [rax]\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      case Op.Store:
+        writer.write("  ;;-- store --\n");
+        writer.write("  pop rbx\n");
+        writer.write("  pop rax\n");
+        writer.write("  mov [rax], bl\n");
+        i++;
+        break;
     }
   }
 
@@ -343,7 +362,7 @@ const crossRef = (program: Instruction[]) => {
 
   for (const [i, { op, ...rest }] of program.entries()) {
     assert(
-      Op.Count == 14,
+      Op.Count == 16,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
@@ -414,7 +433,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 14,
+    Op.Count == 16,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 

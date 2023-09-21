@@ -1,6 +1,6 @@
 import { assert } from "console";
 
-enum Ops {
+enum Op {
   Push = 0,
   Plus,
   Minus,
@@ -17,19 +17,19 @@ enum Ops {
   Count,
 }
 
-const Str2Op: Record<string, Ops> = {
-  ".": Ops.Dump,
-  "+": Ops.Plus,
-  "-": Ops.Minus,
-  "=": Ops.Equal,
-  ">": Ops.Gt,
-  "<": Ops.Lt,
-  "if": Ops.If,
-  "else": Ops.Else,
-  "while": Ops.While,
-  "do": Ops.Do,
-  "end": Ops.End,
-  "dup": Ops.Dup,
+const strToOp: Record<string, Op> = {
+  ".": Op.Dump,
+  "+": Op.Plus,
+  "-": Op.Minus,
+  "=": Op.Equal,
+  ">": Op.Gt,
+  "<": Op.Lt,
+  "if": Op.If,
+  "else": Op.Else,
+  "while": Op.While,
+  "do": Op.Do,
+  "end": Op.End,
+  "dup": Op.Dup,
 };
 
 interface Loc {
@@ -44,7 +44,7 @@ interface Token {
 }
 
 interface Instruction {
-  op: Ops;
+  op: Op;
   loc: Loc;
   value?: any;
   jump?: number;
@@ -58,51 +58,51 @@ const simulate = (program: Instruction[]) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Ops.Count == 13,
+      Op.Count == 13,
       "Exhastive handling of operations is expected in simulate",
     );
     const { op, ...rest } = program[i];
     switch (op) {
-      case Ops.Push:
+      case Op.Push:
         stack.push(rest.value);
         i++;
         break;
-      case Ops.Plus:
+      case Op.Plus:
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg0 + arg1);
         i++;
         break;
-      case Ops.Minus:
+      case Op.Minus:
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg1 - arg0);
         i++;
         break;
-      case Ops.Equal:
+      case Op.Equal:
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push((arg0 == arg1) ? 1 : 0);
         i++;
         break;
-      case Ops.Gt:
+      case Op.Gt:
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push((arg1 > arg0) ? 1 : 0);
         i++;
         break;
-      case Ops.Lt:
+      case Op.Lt:
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push((arg1 < arg0) ? 1 : 0);
         i++;
         break;
-      case Ops.Dump:
+      case Op.Dump:
         arg0 = stack.pop();
         console.log(arg0);
         i++;
         break;
-      case Ops.If:
+      case Op.If:
         arg0 = stack.pop();
         if (arg0 == 0) {
           i = rest.jump!;
@@ -110,13 +110,13 @@ const simulate = (program: Instruction[]) => {
           i++;
         }
         break;
-      case Ops.Else:
+      case Op.Else:
         i = rest.jump!;
         break;
-      case Ops.While:
+      case Op.While:
         i++;
         break;
-      case Ops.Do:
+      case Op.Do:
         arg0 = stack.pop();
         if (arg0 == 0) {
           i = rest.jump!;
@@ -124,10 +124,10 @@ const simulate = (program: Instruction[]) => {
           i++;
         }
         break;
-      case Ops.End:
+      case Op.End:
         i = rest.jump!;
         break;
-      case Ops.Dup:
+      case Op.Dup:
         arg0 = stack.pop();
         stack.push(arg0);
         stack.push(arg0);
@@ -182,17 +182,17 @@ const compile = async (program: Instruction[], out: string) => {
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Ops.Count == 13,
+      Op.Count == 13,
       "Exhastive handling of operations is expected in compile",
     );
     writer.write("addr_" + i + ":\n");
     switch (op) {
-      case Ops.Push:
+      case Op.Push:
         writer.write("  ;;-- push " + rest.value + " --\n");
         writer.write("  push " + rest.value + "\n");
         i++;
         break;
-      case Ops.Plus:
+      case Op.Plus:
         writer.write("  ;;-- plus --\n");
         writer.write("  pop rax\n");
         writer.write("  pop rbx\n");
@@ -200,7 +200,7 @@ const compile = async (program: Instruction[], out: string) => {
         writer.write("  push rax\n");
         i++;
         break;
-      case Ops.Minus:
+      case Op.Minus:
         writer.write("  ;;-- minus --\n");
         writer.write("  pop rax\n");
         writer.write("  pop rbx\n");
@@ -208,7 +208,7 @@ const compile = async (program: Instruction[], out: string) => {
         writer.write("  push rbx\n");
         i++;
         break;
-      case Ops.Equal:
+      case Op.Equal:
         writer.write("  ;;-- equal --\n");
         writer.write("  mov rcx, 0\n");
         writer.write("  mov rdx, 1\n");
@@ -219,7 +219,7 @@ const compile = async (program: Instruction[], out: string) => {
         writer.write("  push rcx\n");
         i++;
         break;
-      case Ops.Gt:
+      case Op.Gt:
         writer.write("  ;;-- gt --\n");
         writer.write("  mov rcx, 0\n");
         writer.write("  mov rdx, 1\n");
@@ -230,7 +230,7 @@ const compile = async (program: Instruction[], out: string) => {
         writer.write("  push rcx\n");
         i++;
         break;
-      case Ops.Lt:
+      case Op.Lt:
         writer.write("  ;;-- lt --\n");
         writer.write("  mov rcx, 0\n");
         writer.write("  mov rdx, 1\n");
@@ -241,44 +241,44 @@ const compile = async (program: Instruction[], out: string) => {
         writer.write("  push rcx\n");
         i++;
         break;
-      case Ops.If:
+      case Op.If:
         writer.write("  ;;-- if --\n");
         writer.write("  pop rax\n");
         writer.write("  test rax, rax\n");
         writer.write("  jz addr_" + rest.jump + "\n");
         i++;
         break;
-      case Ops.Else:
+      case Op.Else:
         writer.write("  ;;-- else --\n");
         writer.write("  jmp addr_" + rest.jump + "\n");
         i++;
         break;
-      case Ops.While:
+      case Op.While:
         writer.write("  ;;-- while --\n");
         i++;
         break;
-      case Ops.Do:
+      case Op.Do:
         writer.write("  ;;-- do --\n");
         writer.write("  pop rax\n");
         writer.write("  test rax, rax\n");
         writer.write("  jz addr_" + rest.jump + "\n");
         i++;
         break;
-      case Ops.End:
+      case Op.End:
         writer.write("  ;;-- end --\n");
         if (i + 1 != rest.jump) {
           writer.write("  jmp addr_" + rest.jump + "\n");
         }
         i++;
         break;
-      case Ops.Dup:
+      case Op.Dup:
         writer.write("  ;;-- dup --\n");
         writer.write("  pop rax\n");
         writer.write("  push rax\n");
         writer.write("  push rax\n");
         i++;
         break;
-      case Ops.Dump:
+      case Op.Dump:
         writer.write("  ;;-- dump --\n");
         writer.write("  pop rdi\n");
         writer.write("  call dump\n");
@@ -318,22 +318,22 @@ const compile = async (program: Instruction[], out: string) => {
   }
 };
 
-const crossref = (program: Instruction[]) => {
+const crossRef = (program: Instruction[]) => {
   let stack = [];
   let start_location: number | undefined;
 
   for (const [i, { op, ...rest }] of program.entries()) {
     assert(
-      Ops.Count == 13,
+      Op.Count == 13,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
-      case Ops.If:
+      case Op.If:
         stack.push(i);
         break;
-      case Ops.Else:
+      case Op.Else:
         let if_location = stack.pop();
-        if (if_location == undefined || program[if_location].op != Ops.If) {
+        if (if_location == undefined || program[if_location].op != Op.If) {
           console.error(
             `ERROR: Unmatched else at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
           );
@@ -342,14 +342,14 @@ const crossref = (program: Instruction[]) => {
         program[if_location].jump = i + 1;
         stack.push(i);
         break;
-      case Ops.While:
+      case Op.While:
         stack.push(i);
         break;
-      case Ops.Do:
+      case Op.Do:
         start_location = stack.pop();
         if (
           start_location == undefined ||
-          program[start_location].op != Ops.While
+          program[start_location].op != Op.While
         ) {
           console.error(
             `ERROR: Unmatched do at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
@@ -359,7 +359,7 @@ const crossref = (program: Instruction[]) => {
         program[i].jump = start_location;
         stack.push(i);
         break;
-      case Ops.End:
+      case Op.End:
         start_location = stack.pop();
         if (start_location == undefined) {
           console.error(
@@ -368,12 +368,12 @@ const crossref = (program: Instruction[]) => {
           process.exit(1);
         }
         if (
-          program[start_location].op == Ops.If ||
-          program[start_location].op == Ops.Else
+          program[start_location].op == Op.If ||
+          program[start_location].op == Op.Else
         ) {
           program[start_location].jump = i;
           program[i].jump = i + 1;
-        } else if (program[start_location].op == Ops.Do) {
+        } else if (program[start_location].op == Op.Do) {
           program[i].jump = program[start_location].jump;
           program[start_location].jump = i + 1;
         }
@@ -391,22 +391,22 @@ const crossref = (program: Instruction[]) => {
   return program;
 };
 
-const parse_token_as_instruction = (
+const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Ops.Count == 13,
+    Op.Count == 13,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 
   const { text, loc } = token;
 
-  if (text in Str2Op) {
-    return { op: Str2Op[text], loc };
+  if (text in strToOp) {
+    return { op: strToOp[text], loc };
   }
 
   if (text.match(/^[0-9]+$/)) {
-    return { op: Ops.Push, loc, value: parseInt(text) };
+    return { op: Op.Push, loc, value: parseInt(text) };
   } else {
     console.error(
       `ERROR: Unknown token ${text} at ${loc.path}:${loc.row}:${loc.col}`,
@@ -415,7 +415,7 @@ const parse_token_as_instruction = (
   }
 };
 
-const collect_cols = (
+const collectCols = (
   line: string,
   col: number,
   predicate: (c: string) => RegExpMatchArray | boolean | null,
@@ -426,15 +426,15 @@ const collect_cols = (
   return col;
 };
 
-const lex_line = (path: string, row: number, line: string) => {
+const lexLine = (path: string, row: number, line: string) => {
   let col = 0;
   let start = 0;
   let res: Token[] = [];
   while (col < line.length) {
-    col = collect_cols(line, col, (c) => c.match(/\s/));
+    col = collectCols(line, col, (c) => c.match(/\s/));
     if (col >= line.length) break;
     start = col;
-    col = collect_cols(line, col, (c) => !c.match(/\s/));
+    col = collectCols(line, col, (c) => !c.match(/\s/));
     res.push({
       text: line.substring(start, col),
       loc: {
@@ -447,20 +447,20 @@ const lex_line = (path: string, row: number, line: string) => {
   return res;
 };
 
-const lex_file = async (path: string) => {
+const lexFile = async (path: string) => {
   const file = Bun.file(path);
   const text = await file.text();
   const lines = text.split("\n").map((line) => line.split("//")[0]);
   return lines.map((
     line,
     row,
-  ) => lex_line(path, row, line)).flat();
+  ) => lexLine(path, row, line)).flat();
 };
 
-const load_program_from_file = async (path: string) => {
-  const lexed = await lex_file(path);
-  const program = lexed.map(parse_token_as_instruction);
-  return crossref(program);
+const loadProgramFromFile = async (path: string) => {
+  const lexed = await lexFile(path);
+  const program = lexed.map(parseTokenAsIntruction);
+  return crossRef(program);
 };
 
 const usage = () => {
@@ -490,12 +490,12 @@ const main = async () => {
   const file = argv[3];
 
   if (subcmd == "sim") {
-    const program = await load_program_from_file(file);
+    const program = await loadProgramFromFile(file);
     simulate(program);
   } else if (subcmd == "com") {
     let out: string = "./build/out";
     if (argc > 4) out = argv[4];
-    const program = await load_program_from_file(file);
+    const program = await loadProgramFromFile(file);
     await compile(program, out);
   } else {
     usage();

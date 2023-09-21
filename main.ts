@@ -527,7 +527,7 @@ const parseTokenAsIntruction = (
     return { op: Op.Push, loc, value: parseInt(text) };
   }
 
-  const syscallMatch = text.match(/^syscall\(([1-6]+)\)$/);
+  const syscallMatch = text.match(/^\(([1-6])\)syscall$/);
   if (syscallMatch) {
     return { op: Op.Syscall, loc, value: parseInt(syscallMatch[1]) };
   }

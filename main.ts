@@ -19,12 +19,12 @@ enum Op {
 }
 
 const strToOp: Record<string, Op> = {
-  ".": Op.Dump,
   "+": Op.Plus,
   "-": Op.Minus,
   "=": Op.Equal,
   ">": Op.Gt,
   "<": Op.Lt,
+  "dump": Op.Dump,
   "if": Op.If,
   "else": Op.Else,
   "while": Op.While,
@@ -60,7 +60,7 @@ const simulate = (program: Instruction[], runOpts: RunOptions) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 13,
+      Op.Count == 14,
       "Exhastive handling of operations is expected in simulate",
     );
     const { op, ...rest } = program[i];
@@ -133,6 +133,10 @@ const simulate = (program: Instruction[], runOpts: RunOptions) => {
         arg0 = stack.pop();
         stack.push(arg0);
         stack.push(arg0);
+        i++;
+        break;
+      case Op.Mem:
+        assert(false, "ERROR: Mem operation is not supported in simulation");
         i++;
         break;
     }

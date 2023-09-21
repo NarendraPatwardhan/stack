@@ -14,7 +14,7 @@ enum Op {
   Do,
   End,
   Dup,
-  DDup,
+  NDup,
   Mem,
   Load,
   Store,
@@ -35,7 +35,6 @@ const strToOp: Record<string, Op> = {
   "do": Op.Do,
   "end": Op.End,
   "dup": Op.Dup,
-  "(2)dup": Op.DDup,
   "mem": Op.Mem,
   ",": Op.Load,
   ".": Op.Store,
@@ -95,7 +94,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let arg1: any;
 
   let syscallNum: number;
-  let syscallArgs: any[] = [];
+  let argsArray: any[] = [];
 
   let stdoutUsed = false;
   let stderrUsed = false;
@@ -178,13 +177,10 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         stack.push(arg0);
         i++;
         break;
-      case Op.DDup:
-        arg0 = stack.pop();
-        arg1 = stack.pop();
-        stack.push(arg1);
-        stack.push(arg0);
-        stack.push(arg1);
-        stack.push(arg0);
+      case Op.NDup:
+        for (let j = 0; j < rest.value; j++) {
+          stack.push(stack[stack.length - rest.value]);
+        }
         i++;
         break;
       case Op.Mem:
@@ -205,13 +201,13 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
       case Op.Syscall:
         syscallNum = stack.pop();
         for (let j = 0; j < rest.value; j++) {
-          syscallArgs.push(stack.pop());
+          argsArray.push(stack.pop());
         }
-        sysCall(syscallNum, syscallArgs, mem);
-        if (syscallNum == 1 && syscallArgs[0] == 1) {
+        sysCall(syscallNum, argsArray, mem);
+        if (syscallNum == 1 && argsArray[0] == 1) {
           stdoutUsed = true;
         }
-        if (syscallNum == 1 && syscallArgs[0] == 2) {
+        if (syscallNum == 1 && argsArray[0] == 2) {
           stderrUsed = true;
         }
         i++;
@@ -232,6 +228,7 @@ const compile = async (
   runOpts: RunOptions,
 ) => {
   const syscallLocs = ["rdi", "rsi", "rdx", "r10", "r8", "r9"];
+  const genLocs = ["rax", "rbx", "rcx", "rdx", "rdi", "rsi"];
 
   const file = Bun.file(runOpts.outPrefix + ".asm");
   const writer = file.writer();
@@ -373,14 +370,16 @@ const compile = async (
         writer.write("  push rax\n");
         i++;
         break;
-      case Op.DDup:
-        writer.write("  ;;-- ddup --\n");
-        writer.write("  pop rax\n");
-        writer.write("  pop rbx\n");
-        writer.write("  push rbx\n");
-        writer.write("  push rax\n");
-        writer.write("  push rbx\n");
-        writer.write("  push rax\n");
+      case Op.NDup:
+        writer.write("  ;;-- ndup --\n");
+        for (let j = 0; j < rest.value; j++) {
+          writer.write("  pop " + genLocs[j] + "\n");
+        }
+        for (let repeat = 0; repeat < 2; repeat++) {
+          for (let j = rest.value - 1; j >= 0; j--) {
+            writer.write("  push " + genLocs[j] + "\n");
+          }
+        }
         i++;
         break;
       case Op.Dump:
@@ -548,9 +547,25 @@ const parseTokenAsIntruction = (
     return { op: Op.Push, loc, value: parseInt(text) };
   }
 
-  const syscallMatch = text.match(/^\(([1-6])\)syscall$/);
-  if (syscallMatch) {
-    return { op: Op.Syscall, loc, value: parseInt(syscallMatch[1]) };
+  const variadicMatch = text.match(/^\(([0-6])\)([a-z]+)$/);
+  if (variadicMatch) {
+    const value = parseInt(variadicMatch[1]);
+    switch (variadicMatch[2]) {
+      case "syscall":
+        return { op: Op.Syscall, loc, value };
+      case "dup":
+        if (value < 2) {
+          console.error(
+            `ERROR: Invalid argument to dup at ${loc.path}:${loc.row}:${loc.col}`,
+          );
+          process.exit(1);
+        }
+        return { op: Op.NDup, loc, value };
+      default:
+        console.error(
+          `ERROR: Unknown token ${text} at ${loc.path}:${loc.row}:${loc.col}`,
+        );
+    }
   }
 
   console.error(

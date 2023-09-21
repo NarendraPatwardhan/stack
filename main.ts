@@ -14,6 +14,7 @@ enum Op {
   Do,
   End,
   Dup,
+  DDup,
   Mem,
   Load,
   Store,
@@ -34,6 +35,7 @@ const strToOp: Record<string, Op> = {
   "do": Op.Do,
   "end": Op.End,
   "dup": Op.Dup,
+  "(2)dup": Op.DDup,
   "mem": Op.Mem,
   ",": Op.Load,
   ".": Op.Store,
@@ -101,7 +103,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 17,
+      Op.Count == 18,
       "Exhastive handling of operations is expected in simulate",
     );
     const { op, ...rest } = program[i];
@@ -173,6 +175,15 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
       case Op.Dup:
         arg0 = stack.pop();
         stack.push(arg0);
+        stack.push(arg0);
+        i++;
+        break;
+      case Op.DDup:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1);
+        stack.push(arg0);
+        stack.push(arg1);
         stack.push(arg0);
         i++;
         break;
@@ -266,7 +277,7 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 17,
+      Op.Count == 18,
       "Exhastive handling of operations is expected in compile",
     );
     writer.write("addr_" + i + ":\n");
@@ -362,6 +373,16 @@ const compile = async (
         writer.write("  push rax\n");
         i++;
         break;
+      case Op.DDup:
+        writer.write("  ;;-- ddup --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  push rbx\n");
+        writer.write("  push rax\n");
+        writer.write("  push rbx\n");
+        writer.write("  push rax\n");
+        i++;
+        break;
       case Op.Dump:
         writer.write("  ;;-- dump --\n");
         writer.write("  pop rdi\n");
@@ -442,7 +463,7 @@ const crossRef = (program: Instruction[]) => {
 
   for (const [i, { op, ...rest }] of program.entries()) {
     assert(
-      Op.Count == 17,
+      Op.Count == 18,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
@@ -513,7 +534,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 17,
+    Op.Count == 18,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 

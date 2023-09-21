@@ -2,11 +2,16 @@ import { assert } from "console";
 
 enum Op {
   Push = 0,
+  Drop,
   Plus,
   Minus,
   Equal,
   Gt,
   Lt,
+  Shr,
+  Shl,
+  Bor,
+  Band,
   Dump,
   If,
   Else,
@@ -23,11 +28,16 @@ enum Op {
 }
 
 const strToOp: Record<string, Op> = {
+  "drop": Op.Drop,
   "+": Op.Plus,
   "-": Op.Minus,
   "=": Op.Equal,
   ">": Op.Gt,
   "<": Op.Lt,
+  "shr": Op.Shr,
+  "shl": Op.Shl,
+  "bor": Op.Bor,
+  "band": Op.Band,
   "dump": Op.Dump,
   "if": Op.If,
   "else": Op.Else,
@@ -102,13 +112,17 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 18,
+      Op.Count == 23,
       "Exhastive handling of operations is expected in simulate",
     );
     const { op, ...rest } = program[i];
     switch (op) {
       case Op.Push:
         stack.push(rest.value);
+        i++;
+        break;
+      case Op.Drop:
+        stack.pop();
         i++;
         break;
       case Op.Plus:
@@ -139,6 +153,30 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push((arg1 < arg0) ? 1 : 0);
+        i++;
+        break;
+      case Op.Shr:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 >> arg0);
+        i++;
+        break;
+      case Op.Shl:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 << arg0);
+        i++;
+        break;
+      case Op.Bor:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 | arg0);
+        i++;
+        break;
+      case Op.Band:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 & arg0);
         i++;
         break;
       case Op.Dump:
@@ -274,7 +312,7 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 18,
+      Op.Count == 23,
       "Exhastive handling of operations is expected in compile",
     );
     writer.write("addr_" + i + ":\n");
@@ -282,6 +320,11 @@ const compile = async (
       case Op.Push:
         writer.write("  ;;-- push " + rest.value + " --\n");
         writer.write("  push " + rest.value + "\n");
+        i++;
+        break;
+      case Op.Drop:
+        writer.write("  ;;-- drop --\n");
+        writer.write("  pop rax\n");
         i++;
         break;
       case Op.Plus:
@@ -331,6 +374,38 @@ const compile = async (
         writer.write("  cmp rbx, rax\n");
         writer.write("  cmovl rcx, rdx\n");
         writer.write("  push rcx\n");
+        i++;
+        break;
+      case Op.Shr:
+        writer.write("  ;;-- shr --\n");
+        writer.write("  pop rcx\n");
+        writer.write("  pop rbx\n");
+        writer.write("  shr rbx, cl\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      case Op.Shl:
+        writer.write("  ;;-- shl --\n");
+        writer.write("  pop rcx\n");
+        writer.write("  pop rbx\n");
+        writer.write("  shl rbx, cl\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      case Op.Bor:
+        writer.write("  ;;-- bor --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  or rbx, rax\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      case Op.Band:
+        writer.write("  ;;-- band --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  and rbx, rax\n");
+        writer.write("  push rbx\n");
         i++;
         break;
       case Op.If:
@@ -462,7 +537,7 @@ const crossRef = (program: Instruction[]) => {
 
   for (const [i, { op, ...rest }] of program.entries()) {
     assert(
-      Op.Count == 18,
+      Op.Count == 23,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
@@ -533,7 +608,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 18,
+    Op.Count == 23,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 

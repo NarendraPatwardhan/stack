@@ -1,0 +1,4 @@
+// If 420 is greater than 69 print 1 else print 0
+420 690 > if
+1 dump
+else 0 dump  end

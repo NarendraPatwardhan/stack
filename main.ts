@@ -57,16 +57,48 @@ interface Instruction {
   jump?: number;
 }
 
+const sysCall = (num: number, args: any[], mem: Uint8Array) => {
+  switch (num) {
+    case 1: // write
+      const fd = args[0];
+      const buf = args[1];
+      const count = args[2];
+      const str = new TextDecoder().decode(mem.slice(buf, buf + count));
+      switch (fd) {
+        case 1:
+          console.log(str);
+          break;
+        case 2:
+          console.error(str);
+          break;
+        default:
+          console.error(
+            "ERROR: Unknown file descriptor " + fd +
+              " only stdout and stderr are supported in simulation mode",
+          );
+          process.exit(1);
+      }
+      break;
+    case 60: // exit
+      process.exit(args[0]);
+    default:
+      console.error("ERROR: Unknown syscall " + num);
+  }
+};
+
 const simulate = (program: Instruction[], runOpts: RunOptions) => {
   let stack: any[] = [];
   let mem: Uint8Array = new Uint8Array(runOpts.memCap);
   let arg0: any;
   let arg1: any;
 
+  let syscallNum: number;
+  let syscallArgs: any[] = [];
+
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 16,
+      Op.Count == 17,
       "Exhastive handling of operations is expected in simulate",
     );
     const { op, ...rest } = program[i];
@@ -154,6 +186,14 @@ const simulate = (program: Instruction[], runOpts: RunOptions) => {
         arg0 = stack.pop();
         arg1 = stack.pop();
         mem[arg1] = arg0 & 0xFF;
+        i++;
+        break;
+      case Op.Syscall:
+        syscallNum = stack.pop();
+        for (let j = 0; j < rest.value; j++) {
+          syscallArgs.push(stack.pop());
+        }
+        sysCall(syscallNum, syscallArgs, mem);
         i++;
         break;
     }

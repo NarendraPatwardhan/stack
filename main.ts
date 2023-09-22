@@ -729,6 +729,39 @@ const crossRef = (program: Instruction[]) => {
   return program;
 };
 
+const escapeString = (str: string): string => {
+  const escapeMap: Record<string, string> = {
+    n: "\n",
+    t: "\t",
+    "\\": "\\",
+    '"': '"',
+  };
+
+  let out = "";
+  let i = 0;
+
+  while (i < str.length) {
+    if (str[i] === "\\") {
+      const escapeChar = str[i + 1];
+
+      if (escapeMap.hasOwnProperty(escapeChar)) {
+        out += escapeMap[escapeChar];
+        i += 2;
+      } else {
+        console.error(
+          `ERROR: Unknown escape sequence \\${escapeChar} in string ${str}`,
+        );
+        process.exit(1);
+      }
+    } else {
+      out += str[i];
+      i++;
+    }
+  }
+
+  return out;
+};
+
 const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
@@ -744,7 +777,11 @@ const parseTokenAsIntruction = (
   }
 
   if (text[0] == '"') {
-    return { op: Op.PushStr, loc, value: text.substring(1, text.length - 1) };
+    return {
+      op: Op.PushStr,
+      loc,
+      value: escapeString(text.substring(1, text.length - 1)),
+    };
   }
 
   if (text.match(/^[0-9]+$/)) {

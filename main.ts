@@ -348,6 +348,9 @@ const compile = async (
   const syscallLocs = ["rdi", "rsi", "rdx", "r10", "r8", "r9"];
   const genLocs = ["rax", "rbx", "rcx", "rdx", "rdi", "rsi"];
 
+  let reserved: Record<string, [string, number, number]> = {};
+  let uniqueReserved = 0;
+
   const file = Bun.file(runOpts.outPrefix + ".asm");
   const writer = file.writer();
   writer.write("segment .text\n");
@@ -404,7 +407,19 @@ const compile = async (
         i++;
         break;
       case Op.PushStr:
-        writer.write("  ;;-- push " + rest.value + " --\n");
+        writer.write("  ;;-- push str --\n");
+        if (!(rest.value in reserved)) {
+          const bts = new TextEncoder().encode(rest.value);
+          const hex = Array.from(bts, (byte) => {
+            return ("0" + (byte & 0xFF).toString(16)).slice(-2);
+          }).map((b) => "0x" + b).join(",");
+          reserved[rest.value] = [hex, uniqueReserved, bts.length];
+          uniqueReserved++;
+        }
+        const [_, idx, btsLen] = reserved[rest.value];
+        writer.write("  mov rax, " + btsLen + "\n");
+        writer.write("  push rax\n");
+        writer.write("  push comptime_" + idx + "\n");
         i++;
         break;
       case Op.Drop:
@@ -623,6 +638,11 @@ const compile = async (
   writer.write("  mov rax, 60\n");
   writer.write("  mov rdi, 0\n");
   writer.write("  syscall\n");
+
+  writer.write("segment .data\n");
+  for (const [_str, [hex, idx, _]] of Object.entries(reserved)) {
+    writer.write("comptime_" + idx + ": db " + hex + "\n");
+  }
 
   writer.write("segment .bss\n");
   writer.write("mem resb " + runOpts.memCap + "\n");

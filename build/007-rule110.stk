@@ -1,0 +1,35 @@
+mem 28 + 1 .
+
+0 while dup 30 < do
+  0 while dup 30 < do
+    dup mem + , if 
+      mem 30 + 42 .
+    else
+      mem 30 + 32 .
+    end
+    1 mem 30 + 1 1 (3)syscall
+    1 +
+  end
+  drop 
+
+  mem 30 + 10 .
+  1 mem 30 + 1 1 (3)syscall
+
+  mem , 1 shl
+  mem 1 + ,
+  bor
+
+  1 while dup 28 < do
+      swap 1 shl 7 band 
+      over mem + 1 + , bor
+      (2)dup 110 swap shr 1 band
+      swap mem + swap .
+      swap
+    
+      1 + 
+  end
+  drop drop
+
+  1 +
+end
+drop

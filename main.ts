@@ -20,6 +20,9 @@ enum Op {
   End,
   Dup,
   NDup,
+  Swap,
+  Over,
+  Rot,
   Mem,
   Load,
   Store,
@@ -45,6 +48,9 @@ const strToOp: Record<string, Op> = {
   "do": Op.Do,
   "end": Op.End,
   "dup": Op.Dup,
+  "swap": Op.Swap,
+  "over": Op.Over,
+  "rot": Op.Rot,
   "mem": Op.Mem,
   ",": Op.Load,
   ".": Op.Store,
@@ -112,7 +118,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 23,
+      Op.Count == 26,
       "Exhastive handling of operations is expected in simulate",
     );
     const { op, ...rest } = program[i];
@@ -221,6 +227,28 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         }
         i++;
         break;
+      case Op.Swap:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg0);
+        stack.push(arg1);
+        i++;
+        break;
+      case Op.Over:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1);
+        stack.push(arg0);
+        stack.push(arg1);
+        i++;
+        break;
+      case Op.Rot:
+        argsArray = [stack.pop(), stack.pop(), stack.pop()];
+        stack.push(argsArray[1]);
+        stack.push(argsArray[0]);
+        stack.push(argsArray[2]);
+        i++;
+        break;
       case Op.Mem:
         stack.push(0);
         i++;
@@ -312,7 +340,7 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 23,
+      Op.Count == 26,
       "Exhastive handling of operations is expected in compile",
     );
     writer.write("addr_" + i + ":\n");
@@ -457,6 +485,33 @@ const compile = async (
         }
         i++;
         break;
+      case Op.Swap:
+        writer.write("  ;;-- swap --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  push rax\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      case Op.Over:
+        writer.write("  ;;-- over --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  push rbx\n");
+        writer.write("  push rax\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      case Op.Rot:
+        writer.write("  ;;-- rot --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  pop rcx\n");
+        writer.write("  push rbx\n");
+        writer.write("  push rax\n");
+        writer.write("  push rcx\n");
+        i++;
+        break;
       case Op.Dump:
         writer.write("  ;;-- dump --\n");
         writer.write("  pop rdi\n");
@@ -537,7 +592,7 @@ const crossRef = (program: Instruction[]) => {
 
   for (const [i, { op, ...rest }] of program.entries()) {
     assert(
-      Op.Count == 23,
+      Op.Count == 26,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
@@ -608,7 +663,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 23,
+    Op.Count == 26,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 

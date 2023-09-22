@@ -575,14 +575,16 @@ const compile = async (
 
   await link.exited;
 
-  console.log("CMD:" + runOpts.outPrefix);
-  const prog = Bun.spawn({
-    cmd: [runOpts.outPrefix],
-  });
-  const res = await new Response(prog.stdout).text();
-  const trimmed = res.trim();
-  if (trimmed != "") {
-    console.log(trimmed);
+  if (runOpts.execute) {
+    console.log("CMD:" + runOpts.outPrefix);
+    const prog = Bun.spawn({
+      cmd: [runOpts.outPrefix],
+    });
+    const res = await new Response(prog.stdout).text();
+    const trimmed = res.trim();
+    if (trimmed != "") {
+      console.log(trimmed);
+    }
   }
 };
 
@@ -762,6 +764,7 @@ const usage = () => {
 interface RunOptions {
   outPrefix: string;
   memCap: number;
+  execute?: boolean;
 }
 
 const main = async (runOpts: RunOptions) => {
@@ -800,5 +803,6 @@ await main(
   {
     outPrefix: "./build/out",
     memCap: 64 * 1024, // 64KB
+    execute: false,
   },
 );

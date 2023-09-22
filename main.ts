@@ -1,56 +1,71 @@
 import { assert } from "console";
 
 enum Op {
+  // Stack manipulation
   Push = 0,
   Drop,
-  Plus,
-  Minus,
-  Equal,
-  Gt,
-  Lt,
-  Shr,
-  Shl,
-  Bor,
-  Band,
-  Dump,
-  If,
-  Else,
-  While,
-  Do,
-  End,
   Dup,
   NDup,
   Swap,
   Over,
   Rot,
+  // Arithmetic
+  Plus,
+  Minus,
+  // Logic
+  Equal,
+  Gt,
+  Lt,
+  // Boolean
+  Shr,
+  Shl,
+  Bor,
+  Band,
+  // Debug
+  Dump,
+  // Control flow
+  If,
+  Else,
+  While,
+  Do,
+  End,
+  // Memory
   Mem,
   Load,
   Store,
+  // Syscall
   Syscall,
   Count,
 }
 
 const strToOp: Record<string, Op> = {
+  // Stack manipulation
   "drop": Op.Drop,
+  "dup": Op.Dup,
+  "swap": Op.Swap,
+  "over": Op.Over,
+  "rot": Op.Rot,
+  // Arithmetic
   "+": Op.Plus,
   "-": Op.Minus,
+  // Logic
   "=": Op.Equal,
   ">": Op.Gt,
   "<": Op.Lt,
+  // Boolean
   "shr": Op.Shr,
   "shl": Op.Shl,
   "bor": Op.Bor,
   "band": Op.Band,
+  // Debug
   "dump": Op.Dump,
+  // Control flow
   "if": Op.If,
   "else": Op.Else,
   "while": Op.While,
   "do": Op.Do,
   "end": Op.End,
-  "dup": Op.Dup,
-  "swap": Op.Swap,
-  "over": Op.Over,
-  "rot": Op.Rot,
+  // Memory
   "mem": Op.Mem,
   ",": Op.Load,
   ".": Op.Store,
@@ -123,6 +138,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
     );
     const { op, ...rest } = program[i];
     switch (op) {
+      // Stack manipulation
       case Op.Push:
         stack.push(rest.value);
         i++;
@@ -130,90 +146,6 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
       case Op.Drop:
         stack.pop();
         i++;
-        break;
-      case Op.Plus:
-        arg0 = stack.pop();
-        arg1 = stack.pop();
-        stack.push(arg1 + arg0);
-        i++;
-        break;
-      case Op.Minus:
-        arg0 = stack.pop();
-        arg1 = stack.pop();
-        stack.push(arg1 - arg0);
-        i++;
-        break;
-      case Op.Equal:
-        arg0 = stack.pop();
-        arg1 = stack.pop();
-        stack.push((arg1 == arg0) ? 1 : 0);
-        i++;
-        break;
-      case Op.Gt:
-        arg0 = stack.pop();
-        arg1 = stack.pop();
-        stack.push((arg1 > arg0) ? 1 : 0);
-        i++;
-        break;
-      case Op.Lt:
-        arg0 = stack.pop();
-        arg1 = stack.pop();
-        stack.push((arg1 < arg0) ? 1 : 0);
-        i++;
-        break;
-      case Op.Shr:
-        arg0 = stack.pop();
-        arg1 = stack.pop();
-        stack.push(arg1 >> arg0);
-        i++;
-        break;
-      case Op.Shl:
-        arg0 = stack.pop();
-        arg1 = stack.pop();
-        stack.push(arg1 << arg0);
-        i++;
-        break;
-      case Op.Bor:
-        arg0 = stack.pop();
-        arg1 = stack.pop();
-        stack.push(arg1 | arg0);
-        i++;
-        break;
-      case Op.Band:
-        arg0 = stack.pop();
-        arg1 = stack.pop();
-        stack.push(arg1 & arg0);
-        i++;
-        break;
-      case Op.Dump:
-        arg0 = stack.pop();
-        console.log(arg0);
-        i++;
-        break;
-      case Op.If:
-        arg0 = stack.pop();
-        if (arg0 == 0) {
-          i = rest.jump!;
-        } else {
-          i++;
-        }
-        break;
-      case Op.Else:
-        i = rest.jump!;
-        break;
-      case Op.While:
-        i++;
-        break;
-      case Op.Do:
-        arg0 = stack.pop();
-        if (arg0 == 0) {
-          i = rest.jump!;
-        } else {
-          i++;
-        }
-        break;
-      case Op.End:
-        i = rest.jump!;
         break;
       case Op.Dup:
         arg0 = stack.pop();
@@ -249,6 +181,96 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         stack.push(argsArray[2]);
         i++;
         break;
+      // Arithmetic
+      case Op.Plus:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 + arg0);
+        i++;
+        break;
+      case Op.Minus:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 - arg0);
+        i++;
+        break;
+      // Logic
+      case Op.Equal:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push((arg1 == arg0) ? 1 : 0);
+        i++;
+        break;
+      case Op.Gt:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push((arg1 > arg0) ? 1 : 0);
+        i++;
+        break;
+      case Op.Lt:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push((arg1 < arg0) ? 1 : 0);
+        i++;
+        break;
+      // Boolean
+      case Op.Shr:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 >> arg0);
+        i++;
+        break;
+      case Op.Shl:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 << arg0);
+        i++;
+        break;
+      case Op.Bor:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 | arg0);
+        i++;
+        break;
+      case Op.Band:
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 & arg0);
+        i++;
+        break;
+      // Debug
+      case Op.Dump:
+        arg0 = stack.pop();
+        console.log(arg0);
+        i++;
+        break;
+      // Control flow
+      case Op.If:
+        arg0 = stack.pop();
+        if (arg0 == 0) {
+          i = rest.jump!;
+        } else {
+          i++;
+        }
+        break;
+      case Op.Else:
+        i = rest.jump!;
+        break;
+      case Op.While:
+        i++;
+        break;
+      case Op.Do:
+        arg0 = stack.pop();
+        if (arg0 == 0) {
+          i = rest.jump!;
+        } else {
+          i++;
+        }
+        break;
+      case Op.End:
+        i = rest.jump!;
+        break;
+      // Memory
       case Op.Mem:
         stack.push(0);
         i++;
@@ -264,6 +286,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         mem[arg1] = arg0 & 0xFF;
         i++;
         break;
+      // Syscall
       case Op.Syscall:
         syscallNum = stack.pop();
         for (let j = 0; j < rest.value; j++) {
@@ -345,6 +368,7 @@ const compile = async (
     );
     writer.write("addr_" + i + ":\n");
     switch (op) {
+      // Stack manipulation
       case Op.Push:
         writer.write("  ;;-- push " + rest.value + " --\n");
         writer.write("  push " + rest.value + "\n");
@@ -353,117 +377,6 @@ const compile = async (
       case Op.Drop:
         writer.write("  ;;-- drop --\n");
         writer.write("  pop rax\n");
-        i++;
-        break;
-      case Op.Plus:
-        writer.write("  ;;-- plus --\n");
-        writer.write("  pop rax\n");
-        writer.write("  pop rbx\n");
-        writer.write("  add rax, rbx\n");
-        writer.write("  push rax\n");
-        i++;
-        break;
-      case Op.Minus:
-        writer.write("  ;;-- minus --\n");
-        writer.write("  pop rax\n");
-        writer.write("  pop rbx\n");
-        writer.write("  sub rbx, rax\n");
-        writer.write("  push rbx\n");
-        i++;
-        break;
-      case Op.Equal:
-        writer.write("  ;;-- equal --\n");
-        writer.write("  mov rcx, 0\n");
-        writer.write("  mov rdx, 1\n");
-        writer.write("  pop rax\n");
-        writer.write("  pop rbx\n");
-        writer.write("  cmp rbx, rax\n");
-        writer.write("  cmove rcx, rdx\n");
-        writer.write("  push rcx\n");
-        i++;
-        break;
-      case Op.Gt:
-        writer.write("  ;;-- gt --\n");
-        writer.write("  mov rcx, 0\n");
-        writer.write("  mov rdx, 1\n");
-        writer.write("  pop rax\n");
-        writer.write("  pop rbx\n");
-        writer.write("  cmp rbx, rax\n");
-        writer.write("  cmovg rcx, rdx\n");
-        writer.write("  push rcx\n");
-        i++;
-        break;
-      case Op.Lt:
-        writer.write("  ;;-- lt --\n");
-        writer.write("  mov rcx, 0\n");
-        writer.write("  mov rdx, 1\n");
-        writer.write("  pop rax\n");
-        writer.write("  pop rbx\n");
-        writer.write("  cmp rbx, rax\n");
-        writer.write("  cmovl rcx, rdx\n");
-        writer.write("  push rcx\n");
-        i++;
-        break;
-      case Op.Shr:
-        writer.write("  ;;-- shr --\n");
-        writer.write("  pop rcx\n");
-        writer.write("  pop rbx\n");
-        writer.write("  shr rbx, cl\n");
-        writer.write("  push rbx\n");
-        i++;
-        break;
-      case Op.Shl:
-        writer.write("  ;;-- shl --\n");
-        writer.write("  pop rcx\n");
-        writer.write("  pop rbx\n");
-        writer.write("  shl rbx, cl\n");
-        writer.write("  push rbx\n");
-        i++;
-        break;
-      case Op.Bor:
-        writer.write("  ;;-- bor --\n");
-        writer.write("  pop rax\n");
-        writer.write("  pop rbx\n");
-        writer.write("  or rbx, rax\n");
-        writer.write("  push rbx\n");
-        i++;
-        break;
-      case Op.Band:
-        writer.write("  ;;-- band --\n");
-        writer.write("  pop rax\n");
-        writer.write("  pop rbx\n");
-        writer.write("  and rbx, rax\n");
-        writer.write("  push rbx\n");
-        i++;
-        break;
-      case Op.If:
-        writer.write("  ;;-- if --\n");
-        writer.write("  pop rax\n");
-        writer.write("  test rax, rax\n");
-        writer.write("  jz addr_" + rest.jump + "\n");
-        i++;
-        break;
-      case Op.Else:
-        writer.write("  ;;-- else --\n");
-        writer.write("  jmp addr_" + rest.jump + "\n");
-        i++;
-        break;
-      case Op.While:
-        writer.write("  ;;-- while --\n");
-        i++;
-        break;
-      case Op.Do:
-        writer.write("  ;;-- do --\n");
-        writer.write("  pop rax\n");
-        writer.write("  test rax, rax\n");
-        writer.write("  jz addr_" + rest.jump + "\n");
-        i++;
-        break;
-      case Op.End:
-        writer.write("  ;;-- end --\n");
-        if (i + 1 != rest.jump) {
-          writer.write("  jmp addr_" + rest.jump + "\n");
-        }
         i++;
         break;
       case Op.Dup:
@@ -512,12 +425,129 @@ const compile = async (
         writer.write("  push rcx\n");
         i++;
         break;
+      // Arithmetic
+      case Op.Plus:
+        writer.write("  ;;-- plus --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  add rax, rbx\n");
+        writer.write("  push rax\n");
+        i++;
+        break;
+      case Op.Minus:
+        writer.write("  ;;-- minus --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  sub rbx, rax\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      // Logic
+      case Op.Equal:
+        writer.write("  ;;-- equal --\n");
+        writer.write("  mov rcx, 0\n");
+        writer.write("  mov rdx, 1\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  cmp rbx, rax\n");
+        writer.write("  cmove rcx, rdx\n");
+        writer.write("  push rcx\n");
+        i++;
+        break;
+      case Op.Gt:
+        writer.write("  ;;-- gt --\n");
+        writer.write("  mov rcx, 0\n");
+        writer.write("  mov rdx, 1\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  cmp rbx, rax\n");
+        writer.write("  cmovg rcx, rdx\n");
+        writer.write("  push rcx\n");
+        i++;
+        break;
+      case Op.Lt:
+        writer.write("  ;;-- lt --\n");
+        writer.write("  mov rcx, 0\n");
+        writer.write("  mov rdx, 1\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  cmp rbx, rax\n");
+        writer.write("  cmovl rcx, rdx\n");
+        writer.write("  push rcx\n");
+        i++;
+        break;
+      // Boolean
+      case Op.Shr:
+        writer.write("  ;;-- shr --\n");
+        writer.write("  pop rcx\n");
+        writer.write("  pop rbx\n");
+        writer.write("  shr rbx, cl\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      case Op.Shl:
+        writer.write("  ;;-- shl --\n");
+        writer.write("  pop rcx\n");
+        writer.write("  pop rbx\n");
+        writer.write("  shl rbx, cl\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      case Op.Bor:
+        writer.write("  ;;-- bor --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  or rbx, rax\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      case Op.Band:
+        writer.write("  ;;-- band --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  and rbx, rax\n");
+        writer.write("  push rbx\n");
+        i++;
+        break;
+      // Control flow
+      case Op.If:
+        writer.write("  ;;-- if --\n");
+        writer.write("  pop rax\n");
+        writer.write("  test rax, rax\n");
+        writer.write("  jz addr_" + rest.jump + "\n");
+        i++;
+        break;
+      case Op.Else:
+        writer.write("  ;;-- else --\n");
+        writer.write("  jmp addr_" + rest.jump + "\n");
+        i++;
+        break;
+      case Op.While:
+        writer.write("  ;;-- while --\n");
+        i++;
+        break;
+      case Op.Do:
+        writer.write("  ;;-- do --\n");
+        writer.write("  pop rax\n");
+        writer.write("  test rax, rax\n");
+        writer.write("  jz addr_" + rest.jump + "\n");
+        i++;
+        break;
+      case Op.End:
+        writer.write("  ;;-- end --\n");
+        if (i + 1 != rest.jump) {
+          writer.write("  jmp addr_" + rest.jump + "\n");
+        }
+        i++;
+        break;
+      // Debug
       case Op.Dump:
         writer.write("  ;;-- dump --\n");
         writer.write("  pop rdi\n");
         writer.write("  call dump\n");
         i++;
         break;
+      // Memory
       case Op.Mem:
         writer.write("  ;;-- mem --\n");
         writer.write("  push mem\n");
@@ -538,6 +568,7 @@ const compile = async (
         writer.write("  mov [rax], bl\n");
         i++;
         break;
+      // Syscall
       case Op.Syscall:
         writer.write("  ;;-- syscall " + rest.value + " --\n");
         writer.write("  pop rax\n");
@@ -785,17 +816,32 @@ const main = async (runOpts: RunOptions) => {
   }
 
   const file = argv[3];
-
-  if (subcmd == "sim") {
-    const program = await loadProgramFromFile(file);
-    await simulate(program, runOpts);
-  } else if (subcmd == "com") {
-    const program = await loadProgramFromFile(file);
-    await compile(program, runOpts);
-  } else {
-    usage();
-    console.error(`Unknown subcommand: ${subcmd}`);
-    process.exit(1);
+  const program = await loadProgramFromFile(file);
+  switch (subcmd) {
+    case "sim":
+      await simulate(program, runOpts);
+      break;
+    case "com":
+      await compile(program, runOpts);
+      break;
+    case "mix":
+      console.log("sim");
+      await simulate(program, runOpts);
+      console.log("com");
+      await compile(program, runOpts);
+      const prog = Bun.spawn({
+        cmd: [runOpts.outPrefix],
+      });
+      const res = await new Response(prog.stdout).text();
+      const trimmed = res.trim();
+      if (trimmed != "") {
+        console.log(trimmed);
+      }
+      break;
+    default:
+      usage();
+      console.error(`Unknown subcommand: ${subcmd}`);
+      process.exit(1);
   }
 };
 

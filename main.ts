@@ -2,7 +2,8 @@ import { assert } from "console";
 
 enum Op {
   // Stack manipulation
-  Push = 0,
+  PushInt = 0,
+  PushStr,
   Drop,
   Dup,
   NDup,
@@ -23,6 +24,7 @@ enum Op {
   Band,
   // Debug
   Dump,
+  Comment,
   // Control flow
   If,
   Else,
@@ -120,12 +122,15 @@ const sysCall = async (num: number, args: any[], mem: Uint8Array) => {
 
 const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let stack: any[] = [];
-  let mem: Uint8Array = new Uint8Array(runOpts.memCap);
+  let mem: Uint8Array = new Uint8Array(runOpts.reservedCap + runOpts.memCap);
   let arg0: any;
   let arg1: any;
 
   let syscallNum: number;
   let argsArray: any[] = [];
+
+  let reservedSoFar = 0;
+  let reservedAddr: Record<string, [number, number]> = {};
 
   let stdoutUsed = false;
   let stderrUsed = false;
@@ -133,14 +138,32 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 26,
+      Op.Count == 28,
       "Exhastive handling of operations is expected in simulate",
     );
     const { op, ...rest } = program[i];
     switch (op) {
       // Stack manipulation
-      case Op.Push:
+      case Op.PushInt:
         stack.push(rest.value);
+        i++;
+        break;
+      case Op.PushStr:
+        if (!(rest.value in reservedAddr)) {
+          const bts = new TextEncoder().encode(rest.value);
+          if (reservedSoFar + bts.length < runOpts.reservedCap) {
+            reservedAddr[rest.value] = [reservedSoFar, bts.length];
+            mem.set(bts, reservedSoFar);
+            reservedSoFar += bts.length;
+          } else {
+            console.error(
+              `ERROR: Insufficient reserved memory at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+            );
+            process.exit(1);
+          }
+        }
+        stack.push(reservedAddr[rest.value][1]);
+        stack.push(reservedAddr[rest.value][0]);
         i++;
         break;
       case Op.Drop:
@@ -244,6 +267,9 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         console.log(arg0);
         i++;
         break;
+      case Op.Comment:
+        i++;
+        break;
       // Control flow
       case Op.If:
         arg0 = stack.pop();
@@ -272,7 +298,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         break;
       // Memory
       case Op.Mem:
-        stack.push(0);
+        stack.push(runOpts.reservedCap);
         i++;
         break;
       case Op.Load:
@@ -289,6 +315,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
       // Syscall
       case Op.Syscall:
         syscallNum = stack.pop();
+        argsArray = [];
         for (let j = 0; j < rest.value; j++) {
           argsArray.push(stack.pop());
         }
@@ -310,6 +337,8 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   if (stderrUsed) {
     await Bun.write(Bun.stderr, "\n");
   }
+
+  console.log("Reserved partition utilization: " + reservedSoFar);
 };
 
 const compile = async (
@@ -363,15 +392,19 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 26,
+      Op.Count == 28,
       "Exhastive handling of operations is expected in compile",
     );
     writer.write("addr_" + i + ":\n");
     switch (op) {
       // Stack manipulation
-      case Op.Push:
+      case Op.PushInt:
         writer.write("  ;;-- push " + rest.value + " --\n");
         writer.write("  push " + rest.value + "\n");
+        i++;
+        break;
+      case Op.PushStr:
+        writer.write("  ;;-- push " + rest.value + " --\n");
         i++;
         break;
       case Op.Drop:
@@ -547,6 +580,10 @@ const compile = async (
         writer.write("  call dump\n");
         i++;
         break;
+      case Op.Comment:
+        writer.write("  ;;-- " + rest.value + " --\n");
+        i++;
+        break;
       // Memory
       case Op.Mem:
         writer.write("  ;;-- mem --\n");
@@ -625,7 +662,7 @@ const crossRef = (program: Instruction[]) => {
 
   for (const [i, { op, ...rest }] of program.entries()) {
     assert(
-      Op.Count == 26,
+      Op.Count == 28,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
@@ -696,18 +733,26 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 26,
+    Op.Count == 28,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 
   const { text, loc } = token;
 
-  if (text in strToOp) {
-    return { op: strToOp[text], loc };
+  if (text[0] == "#") {
+    return { op: Op.Comment, loc, value: text };
+  }
+
+  if (text[0] == '"') {
+    return { op: Op.PushStr, loc, value: text.substring(1, text.length - 1) };
   }
 
   if (text.match(/^[0-9]+$/)) {
-    return { op: Op.Push, loc, value: parseInt(text) };
+    return { op: Op.PushInt, loc, value: parseInt(text) };
+  }
+
+  if (text in strToOp) {
+    return { op: strToOp[text], loc };
   }
 
   const variadicMatch = text.match(/^\(([0-6])\)([a-z]+)$/);
@@ -737,46 +782,92 @@ const parseTokenAsIntruction = (
   process.exit(1);
 };
 
-const collectCols = (
-  line: string,
+const incrementCursor = (
+  text: string,
+  cur: number,
+  row: number,
   col: number,
-  predicate: (c: string) => RegExpMatchArray | boolean | null,
 ) => {
-  while (col < line.length && predicate(line[col])) {
+  if (text[cur] == "\n") {
+    row++;
+    col = 0;
+  } else {
     col++;
   }
-  return col;
+  cur++;
+  return [cur, row, col];
 };
 
-const lexLine = (path: string, row: number, line: string) => {
-  let col = 0;
-  let start = 0;
-  let res: Token[] = [];
-  while (col < line.length) {
-    col = collectCols(line, col, (c) => c.match(/\s/));
-    if (col >= line.length) break;
-    start = col;
-    col = collectCols(line, col, (c) => !c.match(/\s/));
-    res.push({
-      text: line.substring(start, col),
-      loc: {
-        path,
-        row,
-        col: start,
-      },
-    });
+const collectChars = (
+  text: string,
+  cur: number,
+  row: number,
+  col: number,
+  predicate: (buf: string, index: number) => RegExpMatchArray | boolean | null,
+) => {
+  while (cur < text.length && predicate(text, cur)) {
+    [cur, row, col] = incrementCursor(text, cur, row, col);
   }
-  return res;
+  return [cur, row, col];
 };
 
 const lexFile = async (path: string) => {
   const file = Bun.file(path);
   const text = await file.text();
-  const lines = text.split("\n").map((line) => line.split("//")[0]);
-  return lines.map((
-    line,
-    row,
-  ) => lexLine(path, row, line)).flat();
+  let row = 0;
+  let col = 0;
+  let cur = 0;
+  let tokens: Token[] = [];
+  while (cur < text.length) {
+    [cur, row, col] = collectChars(
+      text,
+      cur,
+      row,
+      col,
+      (buf, i) => buf[i].match(/\s/),
+    );
+    if (cur >= text.length) break;
+    let start = cur;
+    let srow = row;
+    let scol = col;
+    switch (text[start]) {
+      case '"':
+        [cur, row, col] = incrementCursor(text, cur, row, col);
+        [cur, row, col] = collectChars(
+          text,
+          cur,
+          row,
+          col,
+          (buf, i) =>
+            (i > 0 && buf[i - 1] !== "\\" && buf[i] === '"') ? false : true,
+        );
+        [cur, row, col] = incrementCursor(text, cur, row, col);
+        break;
+      case "#":
+        [cur, row, col] = collectChars(
+          text,
+          cur,
+          row,
+          col,
+          (buf, c) => !buf[c].match(/\n/),
+        );
+        break;
+      default:
+        [cur, row, col] = collectChars(
+          text,
+          cur,
+          row,
+          col,
+          (buf, i) => !buf[i].match(/\s/),
+        );
+        break;
+    }
+    tokens.push({
+      text: text.substring(start, cur),
+      loc: { path, row: srow, col: scol },
+    });
+  }
+  return tokens;
 };
 
 const loadProgramFromFile = async (path: string) => {
@@ -794,6 +885,7 @@ const usage = () => {
 
 interface RunOptions {
   outPrefix: string;
+  reservedCap: number;
   memCap: number;
   execute?: boolean;
 }
@@ -848,6 +940,7 @@ const main = async (runOpts: RunOptions) => {
 await main(
   {
     outPrefix: "./build/out",
+    reservedCap: 64 * 1024, // 64KB
     memCap: 64 * 1024, // 64KB
     execute: false,
   },

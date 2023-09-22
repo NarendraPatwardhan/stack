@@ -1,4 +1,4 @@
-// Count down from 10 to 1 and print it
+# Count down from 10 to 1 and print it
 10 while dup 0 > do
   dup dump
   1 -

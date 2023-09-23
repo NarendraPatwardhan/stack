@@ -1,0 +1,8 @@
+macro STDOUT 1 end
+macro write 1 (3)syscall and
+
+proc puts STDOUT write end
+
+10 0 while (2)dup > do
+  "Hello, World!\n" puts
+end

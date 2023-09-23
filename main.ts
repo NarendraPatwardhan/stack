@@ -752,12 +752,20 @@ const compile = async (
 };
 
 const crossRef = (program: Instruction[]) => {
+  // The stack of indexes of any operations that start a block
   let stack = [];
+  // The index of the operation that starts the block
   let start_location: number | undefined;
 
-  let known: Record<string, number> = {};
-  let seen = [];
+  // The map of identifiers filled after encoutering their definition
+  // The value is array of [kind, jump] where kind is the operation that defines the identifier
+  // and jump is the index of the operation that defines the identifier
+  let knownIdentifiers: Record<string, [Op, number]> = {};
 
+  // The list of identifiers seen in the program
+  let seenIdentifiers = [];
+
+  // Flag to check if we are in a proc definition to prevent nested proc definitions
   let procDefinition = false;
 
   for (const [i, { op, ...rest }] of program.entries()) {
@@ -767,24 +775,32 @@ const crossRef = (program: Instruction[]) => {
     );
     switch (op) {
       case Op.If:
+        // Push the index of the if instruction to the stack to be used with the next else or end instruction
         stack.push(i);
         break;
       case Op.Else:
+        // Pop the index of the if instruction from the stack
         let if_location = stack.pop();
+        // Check if the instruction is of kind if, otherwise it is an unmatched else, so we exit
         if (if_location == undefined || program[if_location].op != Op.If) {
           console.error(
             `ERROR: Unmatched else at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
           );
           process.exit(1);
         }
+        // Set the jump of corresponding if instruction to the index after the else instruction
         program[if_location].jump = i + 1;
+        // Since now else needs closing, we push the index of the else instruction to the stack to be used with the next end instruction
         stack.push(i);
         break;
       case Op.While:
+        // Push the index of the while instruction to the stack to be used with the next do and end instruction
         stack.push(i);
         break;
       case Op.Do:
+        // Pop the index of the while instruction from the stack
         start_location = stack.pop();
+        // Check if the instruction is of kind while, otherwise it is an unmatched do, so we exit
         if (
           start_location == undefined ||
           program[start_location].op != Op.While
@@ -794,66 +810,115 @@ const crossRef = (program: Instruction[]) => {
           );
           process.exit(1);
         }
+        // Set the jump of current do instruction to the index of the while instruction
+        // This is to store it for the end instruction, since do does not jump to while
+        // Do jumps either to the next instruction or to the instruction after the end
         program[i].jump = start_location;
         stack.push(i);
         break;
       case Op.End:
+        // Pop the index of the start of the block from the stack
         start_location = stack.pop();
+        // If we are not in a block, then it is an unmatched end, so we exit
         if (start_location == undefined) {
           console.error(
             `ERROR: Unmatched end at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
           );
           process.exit(1);
         }
-        if (
-          program[start_location].op == Op.If ||
-          program[start_location].op == Op.Else
-        ) {
-          program[start_location].jump = i;
-          program[i].jump = i + 1;
-        } else if (program[start_location].op == Op.Do) {
-          program[i].jump = program[start_location].jump;
-          program[start_location].jump = i + 1;
-        } else if (program[start_location].op == Op.ProcDef) {
-          procDefinition = false;
-          program[start_location].jump = i + 1;
-          program[i].op = Op.ProcRet;
+        switch (program[start_location].op) {
+          case Op.If || Op.Else:
+            // If the corresponding operation is If or Else, then we set their jump to index of current End
+            // This jump is used when If condition is false in case of If-End block (without Else)
+            // Or when the If condition is true in case of If-Else-End block, thus skipping the Else block
+            program[start_location].jump = i;
+            // We also set the jump of the current end to the next instruction
+            // This is used immediately as end always jumps
+            program[i].jump = i + 1;
+            break;
+          case Op.Do:
+            // If the corresponding operation is Do, then we need to jump to the paired While instruction
+            // We obtain the index of While stored within the Do instruction and set it
+            // This is used immediately as End always jumps
+            program[i].jump = program[start_location].jump;
+            // But the Do instruction needs to exit the loop if condition is false
+            // So now we set the jump of corresponding Do instruction to the next index after current End
+            program[start_location].jump = i + 1;
+            break;
+          case Op.ProcDef:
+            // If the corresponding operation is ProcDef, we first set the flag to signify definition is over
+            procDefinition = false;
+            // Then we set the jump of the ProcDef instruction to the next index after current End
+            // This means when we encounter ProcDef, we should just directly skip to after the End.
+            program[start_location].jump = i + 1;
+            // However when the ProcCall procedure is used, we need to change the behavior of End
+            // So we simply replace the current End instruction with ProcRet
+            program[i].op = Op.ProcRet;
+            break;
+          default:
+            console.error(
+              `ERROR: Unreachable end at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+            );
+            process.exit(1);
         }
         break;
       case Op.ProcDef:
+        // Check that the next instruction is an identifier
         if (program[i + 1].op != Op.Identifier) {
           console.error(
-            `ERROR: Proc name must be an unique identifier at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+            `ERROR: Proc name must be identifier at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
           );
           process.exit(1);
         }
-        stack.push(i);
         const procName = program[i + 1].value;
+        // Check that the identifier is not already defined for any abstraction
+        if (knownIdentifiers.hasOwnProperty(procName)) {
+          console.error(
+            `ERROR: Duplicate identifier ${
+              program[i + 1].value
+            } at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+        }
+        // Push the index of the identifier to the stack to be used with the next end instruction
+        stack.push(i);
+        // Check if we are already in a proc definition, we don't support nested procs
         if (procDefinition) {
           console.error(
             `ERROR: Nested proc definition at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
           );
           process.exit(1);
         }
+        // Since we are not in nested proc definition, we can set the flag
         procDefinition = true;
-        known[procName] = i + 1;
+        // Add the identifier to the known identifiers map with kind ProcDef and the index of the ProcBegin
+        knownIdentifiers[procName] = [Op.ProcDef, i + 1];
+        // Change the next operation from identifier to ProcBegin
         program[i + 1].op = Op.ProcBegin;
         break;
       case Op.Identifier:
-        seen.push([rest.value, i, rest.loc]);
+        // Push the raw text, index and location of the identifier to the seen list
+        seenIdentifiers.push([rest.value, i, rest.loc]);
         break;
     }
 
     // Check for undefined identifiers
-    for (const [name, i, loc] of seen) {
-      if (!known.hasOwnProperty(name)) {
+    for (const [name, i, loc] of seenIdentifiers) {
+      if (!knownIdentifiers.hasOwnProperty(name)) {
         console.error(
           `ERROR: Undefined identifier ${name} at ${loc.path}:${loc.row}:${loc.col}`,
         );
         process.exit(1);
       } else {
-        program[i].op = Op.ProcCall;
-        program[i].jump = known[name];
+        // Since we know the identifier, we can replace it with the correct operation
+        let [kind, jump] = knownIdentifiers[name];
+        switch (kind) {
+          case Op.ProcDef:
+            // Since we know the identifier from ProcDef, we replace this instruction with ProcCall
+            program[i].op = Op.ProcCall;
+            // We also set the jump to the index of the ProcBegin
+            program[i].jump = jump;
+            break;
+        }
       }
     }
   }

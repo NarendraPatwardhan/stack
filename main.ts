@@ -218,7 +218,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         break;
       case Op.NDup:
         // We pop the top of the stack and push it n times
-        // [b, a] -> [b, a, a ... a]
+        // N = 3 -> [d c b a] -> [d c b a c b a]
         for (let j = 0; j < rest.value; j++) {
           stack.push(stack[stack.length - rest.value]);
         }
@@ -467,14 +467,26 @@ const compile = async (
   program: Instruction[],
   runOpts: RunOptions,
 ) => {
+  // We use the x86_64 calling convention for syscalls
+  // We store the order of the registers in which the syscall arguments are passed
+  // This will be used for handling variadic arguments
   const syscallLocs = ["rdi", "rsi", "rdx", "r10", "r8", "r9"];
+  // We store the order of the registers in which the general purpose registers are passed
   const genLocs = ["rax", "rbx", "rcx", "rdx", "rdi", "rsi"];
 
+  // We initiate a record for reserved objects
+  // The key is the raw string? of the object TODO: should this be raw string? what about other types?
+  // The value is a tuple of the hex representation of the object, the unique id of the object, and the length of the object
   let reserved: Record<string, [string, number, number]> = {};
+  // We initiate a unique id for reserved objects
   let uniqueReserved = 0;
 
+  // We create a file to write the assembly to
   const file = Bun.file(runOpts.outPrefix + ".asm");
   const writer = file.writer();
+
+  // We write the assembly preamble
+  // This part is for debugging purposes and supports the dump operation
   writer.write("segment .text\n");
   writer.write("dump:\n");
   writer.write("  mov     r9, -3689348814741910323\n");
@@ -509,12 +521,19 @@ const compile = async (
   writer.write("  add     rsp, 40\n");
   writer.write("  ret\n");
 
+  // We set the starting point of the program
   writer.write("global _start\n");
   writer.write("_start:\n");
+
+  // Need better explnation of this but we basically tell where dynamic memory starts
+  // We first mov the address of the end of the reserved memory to rax
+  // We then mov this value from rax to the process_stack_rsp pointer
   writer.write("  ;;-- init --\n");
   writer.write("  mov rax, process_stack_end\n");
   writer.write("  mov [process_stack_rsp], rax\n");
 
+  // This begins the actual source code transpilation
+  // For any undocumented stack operations, see the simulation case
   const end = program.length;
   let i = 0;
   while (i < end) {
@@ -523,27 +542,40 @@ const compile = async (
       Op.Count == 33,
       "Exhastive handling of operations is expected in compile",
     );
+    // We create a label for the current instruction
+    // We do this for each instruction for ease of jumping
     writer.write("addr_" + i + ":\n");
     switch (op) {
       // Stack manipulation
       case Op.PushInt:
         writer.write("  ;;-- push " + rest.value + " --\n");
+        // For integers, we simply push the value to the stack
         writer.write("  push " + rest.value + "\n");
         i++;
         break;
       case Op.PushStr:
         writer.write("  ;;-- push str --\n");
+        // For strings, we check if the string is already reserved, if not we reserve it
+        // Unlike in simulation, we don't check if we have enough reserved memory
         if (!(rest.value in reserved)) {
+          // We first encode the string to bytes
           const bts = new TextEncoder().encode(rest.value);
+          // We generate a hex representation of each byte and stitch it in a comma separated string
           const hex = Array.from(bts, (byte) => {
             return ("0" + (byte & 0xFF).toString(16)).slice(-2);
           }).map((b) => "0x" + b).join(",");
+          // We store the hex representation, unique id, and length of the byte repre in the reserved map
           reserved[rest.value] = [hex, uniqueReserved, bts.length];
+          // We increment the uniqueReserved pointer
           uniqueReserved++;
         }
+        // We fetch the hex representation, unique id, and length of the byte repre from the reserved map
         const [_, idx, btsLen] = reserved[rest.value];
+        // We copy the length of the byte repr to rax
         writer.write("  mov rax, " + btsLen + "\n");
+        // We push the address of the byte repr to the stack
         writer.write("  push rax\n");
+        // We push the unique id of the byte repr to the stack
         writer.write("  push comptime_" + idx + "\n");
         i++;
         break;
@@ -561,6 +593,9 @@ const compile = async (
         break;
       case Op.NDup:
         writer.write("  ;;-- ndup --\n");
+        // We pop the last n values from the stack and put them in general purpose registers
+        // We then push the values back on the stack twice in reverse order
+        // N = 3 -> [d c b a] -> [d c b a c b a]
         for (let j = 0; j < rest.value; j++) {
           writer.write("  pop " + genLocs[j] + "\n");
         }
@@ -708,6 +743,8 @@ const compile = async (
         break;
       case Op.End:
         writer.write("  ;;-- end --\n");
+        // End always jumps, where to is determined by the block kind
+        // See crossRef for the behavior of End
         if (i + 1 != rest.jump) {
           writer.write("  jmp addr_" + rest.jump + "\n");
         }
@@ -732,9 +769,13 @@ const compile = async (
         break;
       case Op.Load:
         writer.write("  ;;-- load --\n");
+        // We pop the top of the stack and use it as an address to load from
         writer.write("  pop rax\n");
+        // We empty the rbx register
         writer.write("  xor rbx, rbx\n");
+        // We move the value at the address to the lower byte of rbx
         writer.write("  mov bl, [rax]\n");
+        // We push the value loaded in rbx to the stack
         writer.write("  push rbx\n");
         i++;
         break;
@@ -748,6 +789,7 @@ const compile = async (
       // Abstraction
       case Op.ProcDef:
         writer.write("  ;;-- proc " + program[i + 1].value + " --\n");
+        // In case of ProcDef, we jump to instruction after the End of the procedure
         writer.write("  jmp addr_" + rest.jump + "\n");
         i++;
         break;
@@ -782,10 +824,14 @@ const compile = async (
         // Syscall
       case Op.Syscall:
         writer.write("  ;;-- syscall " + rest.value + " --\n");
+        // We pop the top of the stack as the syscall number
         writer.write("  pop rax\n");
+        // Depending on the number of arguments required, we pop that many from the stack
+        // We then move the popped values to the registers in which the syscall arguments are passed
         for (let j = 0; j < rest.value; j++) {
           writer.write("  pop " + syscallLocs[j] + "\n");
         }
+        // We perform the syscall
         writer.write("  syscall\n");
         i++;
         break;
@@ -793,22 +839,31 @@ const compile = async (
   }
 
   writer.write("  ;;-- exit --\n");
+  // We exit the program with exit code 0 by calling the exit syscall
   writer.write("addr_" + i + ":\n");
   writer.write("  mov rax, 60\n");
   writer.write("  mov rdi, 0\n");
   writer.write("  syscall\n");
 
+  // We write the assembly postamble starting here
   writer.write("segment .data\n");
+  // The data segment contains comptime known objects
   for (const [_str, [hex, idx, _]] of Object.entries(reserved)) {
     writer.write("comptime_" + idx + ": db " + hex + "\n");
   }
 
+  // The bss segment contains runtime objects
   writer.write("segment .bss\n");
+  // We first reserve the memory for the process stack pointer
   writer.write("process_stack_rsp resq 1\n");
+  // We then reserve the memory for the process stack
   writer.write("process_stack resb " + runOpts.procStackCap + "\n");
+  // We mark the end of the process stack as label to signify the start of the dynamic memory
   writer.write("process_stack_end:\n");
+  // We reserve the memory for the dynamic memory
   writer.write("mem resb " + runOpts.memCap + "\n");
 
+  // We close the file and write the assembly to the file
   writer.end();
   console.log("CMD: nasm -felf64 " + runOpts.outPrefix + ".asm");
   const nasm = Bun.spawn({

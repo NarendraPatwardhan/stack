@@ -946,10 +946,7 @@ const parseTokenAsIntruction = (
         }
         return { op: Op.NDup, loc, value };
       default:
-        console.error(
-          `ERROR: Unknown variadic instruction ${text} at ${loc.path}:${loc.row}:${loc.col}`,
-        );
-        process.exit(1);
+        break;
     }
   }
   return { op: Op.Identifier, loc, value: text };

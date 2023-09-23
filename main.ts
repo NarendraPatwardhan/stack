@@ -826,40 +826,39 @@ const crossRef = (program: Instruction[]) => {
           );
           process.exit(1);
         }
-        switch (program[start_location].op) {
-          case Op.If || Op.Else:
-            // If the corresponding operation is If or Else, then we set their jump to index of current End
-            // This jump is used when If condition is false in case of If-End block (without Else)
-            // Or when the If condition is true in case of If-Else-End block, thus skipping the Else block
-            program[start_location].jump = i;
-            // We also set the jump of the current end to the next instruction
-            // This is used immediately as end always jumps
-            program[i].jump = i + 1;
-            break;
-          case Op.Do:
-            // If the corresponding operation is Do, then we need to jump to the paired While instruction
-            // We obtain the index of While stored within the Do instruction and set it
-            // This is used immediately as End always jumps
-            program[i].jump = program[start_location].jump;
-            // But the Do instruction needs to exit the loop if condition is false
-            // So now we set the jump of corresponding Do instruction to the next index after current End
-            program[start_location].jump = i + 1;
-            break;
-          case Op.ProcDef:
-            // If the corresponding operation is ProcDef, we first set the flag to signify definition is over
-            procDefinition = false;
-            // Then we set the jump of the ProcDef instruction to the next index after current End
-            // This means when we encounter ProcDef, we should just directly skip to after the End.
-            program[start_location].jump = i + 1;
-            // However when the ProcCall procedure is used, we need to change the behavior of End
-            // So we simply replace the current End instruction with ProcRet
-            program[i].op = Op.ProcRet;
-            break;
-          default:
-            console.error(
-              `ERROR: Unreachable end at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
-            );
-            process.exit(1);
+        const corrOp = program[start_location].op;
+        if (corrOp == Op.If || corrOp == Op.Else) {
+          // If the corresponding operation is If or Else, then we set their jump to index of current End
+          // This jump is used when If condition is false in case of If-End block (without Else)
+          // Or when the If condition is true in case of If-Else-End block, thus skipping the Else block
+          program[start_location].jump = i;
+          // We also set the jump of the current end to the next instruction
+          // This is used immediately as end always jumps
+          program[i].jump = i + 1;
+        } else if (corrOp == Op.Do) {
+          // If the corresponding operation is Do, then we need to jump to the paired While instruction
+          // We obtain the index of While stored within the Do instruction and set it
+          // This is used immediately as End always jumps
+          program[i].jump = program[start_location].jump;
+          // But the Do instruction needs to exit the loop if condition is false
+          // So now we set the jump of corresponding Do instruction to the next index after current End
+          program[start_location].jump = i + 1;
+        } else if (corrOp == Op.ProcDef) {
+          // If the corresponding operation is ProcDef, we first set the flag to signify definition is over
+          procDefinition = false;
+          // Then we set the jump of the ProcDef instruction to the next index after current End
+          // This means when we encounter ProcDef, we should just directly skip to after the End.
+          program[start_location].jump = i + 1;
+          // However when the ProcCall procedure is used, we need to change the behavior of End
+          // So we simply replace the current End instruction with ProcRet
+          program[i].op = Op.ProcRet;
+        } else {
+          console.error(
+            `ERROR: Unreachable end started with ${
+              program[start_location].op
+            } at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+          process.exit(1);
         }
         break;
       case Op.ProcDef:
@@ -1047,13 +1046,18 @@ const collectChars = (
 };
 
 const lexFile = async (path: string) => {
+  // We first read the file into a string
   const file = Bun.file(path);
   const text = await file.text();
+  // We begin lexing with a cursor at the start of the file
   let row = 0;
   let col = 0;
   let cur = 0;
+  // We initiate a list for collecting tokens
   let tokens: Token[] = [];
+  // We continue lexing until we reach the end of the file
   while (cur < text.length) {
+    // We eliminate any starting whitespace
     [cur, row, col] = collectChars(
       text,
       cur,
@@ -1061,20 +1065,24 @@ const lexFile = async (path: string) => {
       col,
       (buf, i) => buf[i].match(/\s/),
     );
+    // If we have reached the end of the file, we break
     if (cur >= text.length) break;
+    // We are at a non-whitespace character, so we store the start of the token
     let start = cur;
     let srow = row;
     let scol = col;
+    // Depending on the character, we change the lexing behavior
     switch (text[start]) {
       case '"':
+        // If the current character is a double quote, we are lexing a string
+        // We increment the cursor to next character as lexing a string requires 1lookback
         [cur, row, col] = incrementCursor(text, cur, row, col);
         [cur, row, col] = collectChars(
           text,
           cur,
           row,
           col,
-          (buf, i) =>
-            (i > 0 && buf[i - 1] !== "\\" && buf[i] === '"') ? false : true,
+          (buf, i) => (buf[i - 1] !== "\\" && buf[i] === '"') ? false : true,
         );
         [cur, row, col] = incrementCursor(text, cur, row, col);
         break;
@@ -1106,8 +1114,11 @@ const lexFile = async (path: string) => {
 };
 
 const loadProgramFromFile = async (path: string) => {
+  // We first lex the file into tokens
   const lexed = await lexFile(path);
+  // Then we parse the tokens into instructions
   const program = lexed.map(parseTokenAsIntruction);
+  // Then we cross reference the instructions to resolve identifiers and blocks
   return crossRef(program);
 };
 
@@ -1121,11 +1132,11 @@ const usage = () => {
 };
 
 interface RunOptions {
-  outPrefix: string;
-  reservedCap: number;
-  memCap: number;
-  procStackCap: number;
-  execute?: boolean;
+  outPrefix: string; // We generate .asm, .o and executable with this prefix when compiling
+  reservedCap: number; // The static memory reserved for compile time known values
+  memCap: number; // The dynamic memory reserved for runtime
+  procStackCap: number; // The procdure inception limit
+  execute?: boolean; // Whether to execute the compiled program
 }
 
 const main = async (runOpts: RunOptions) => {

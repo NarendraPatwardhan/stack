@@ -1,4 +1,5 @@
 import { assert } from "console";
+import { argv0 } from "process";
 
 enum Op {
   // Stack manipulation
@@ -129,70 +130,103 @@ const sysCall = async (num: number, args: any[], mem: Uint8Array) => {
 };
 
 const simulate = async (program: Instruction[], runOpts: RunOptions) => {
+  // The stack of any runtime values - Typically integers or pointers
   let stack: any[] = [];
+  // We combine the comptime known reserved memory and the runtime memory in a single array for sim
   let mem: Uint8Array = new Uint8Array(runOpts.reservedCap + runOpts.memCap);
+
+  // Store for stack pops for most ops
   let arg0: any;
   let arg1: any;
 
+  // Store for syscall number
   let syscallNum: number;
+  // Store for variadic arguments, Typically required for syscalls
   let argsArray: any[] = [];
 
+  // Pointer to reserved memory, indicating utilization
   let reservedSoFar = 0;
+  // Map of reserved objects to their address and length
+  // TODO: should this be raw string? what about other types?
   let reservedAddr: Record<string, [number, number]> = {};
 
+  // Procedure stack to limit infinite recursion
   let procStack: number[] = [];
 
+  // Flags to check if we printed to stdout or stderr
   let stdoutUsed = false;
   let stderrUsed = false;
 
+  // i denotes the current instruction index
   let i = 0;
   while (i < program.length) {
     assert(
       Op.Count == 33,
       "Exhastive handling of operations is expected in simulate",
     );
+    // We destructure the instruction into op and rest
     const { op, ...rest } = program[i];
     switch (op) {
       // Stack manipulation
       case Op.PushInt:
+        // For integers, we simply push the value to the stack
         stack.push(rest.value);
         i++;
         break;
       case Op.PushStr:
+        // For strings, we check if the string is already reserved, if not we reserve it
         if (!(rest.value in reservedAddr)) {
+          // We first encode the string to bytes
           const bts = new TextEncoder().encode(rest.value);
+          // We check if we have enough reserved memory to store the string
           if (reservedSoFar + bts.length < runOpts.reservedCap) {
+            // Since we have enough memory, we add new entry to the reserved map
+            // The entry is a tuple of the address and length of the byte repre with raw string as the key
             reservedAddr[rest.value] = [reservedSoFar, bts.length];
+            // We copy the bytes to the reserved memory
             mem.set(bts, reservedSoFar);
+            // We increment the reservedSoFar pointer
             reservedSoFar += bts.length;
           } else {
+            // We don't have enough memory, so we exit
             console.error(
               `ERROR: Insufficient reserved memory at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
             );
             process.exit(1);
           }
         }
+        // We first push the length of the string to the stack
         stack.push(reservedAddr[rest.value][1]);
+        // We then push the address of the string to the stack
+        // So the stack has [strLen, strAddr] for consumption, which is the proper form
         stack.push(reservedAddr[rest.value][0]);
         i++;
         break;
       case Op.Drop:
+        // We pop the top of the stack and discard it
+        // [a] -> []
         stack.pop();
         i++;
         break;
       case Op.Dup:
+        // We pop the top of the stack and push it twice
+        // [a] -> [a, a]
         arg0 = stack.pop();
         stack.push(arg0);
         stack.push(arg0);
         i++;
         break;
       case Op.NDup:
+        // We pop the top of the stack and push it n times
+        // [b, a] -> [b, a, a ... a]
         for (let j = 0; j < rest.value; j++) {
           stack.push(stack[stack.length - rest.value]);
         }
         i++;
         break;
       case Op.Swap:
+        // We pop the top two elements of the stack and push them in reverse order
+        // [b, a] -> [a, b]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg0);
@@ -200,6 +234,8 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         i++;
         break;
       case Op.Over:
+        // We pop the top two elements of the stack and push them in reverse order, then push the second element again
+        // [b, a] -> [a, b, a]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg1);
@@ -208,6 +244,8 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         i++;
         break;
       case Op.Rot:
+        // We pop the top three elements of the stack and rotate their order
+        // [c, b, a] -> [b, a, c]
         argsArray = [stack.pop(), stack.pop(), stack.pop()];
         stack.push(argsArray[1]);
         stack.push(argsArray[0]);
@@ -216,12 +254,16 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         break;
       // Arithmetic
       case Op.Plus:
+        // We pop the top two elements of the stack and push their sum
+        // [b, a] -> [b + a]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg1 + arg0);
         i++;
         break;
       case Op.Minus:
+        // We pop the top two elements of the stack and push their difference
+        // [b, a] -> [b - a]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg1 - arg0);
@@ -229,18 +271,24 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         break;
       // Logic
       case Op.Equal:
+        // We pop the top two elements of the stack and push 1 if they are equal, 0 otherwise
+        // [b, a] -> [int(b == a)]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push((arg1 == arg0) ? 1 : 0);
         i++;
         break;
       case Op.Gt:
+        // We pop the top two elements of the stack and push 1 if the second is greater than the first, 0 otherwise
+        // [b, a] -> [int(b > a)]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push((arg1 > arg0) ? 1 : 0);
         i++;
         break;
       case Op.Lt:
+        // We pop the top two elements of the stack and push 1 if the second is less than the first, 0 otherwise
+        // [b, a] -> [int(b < a)]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push((arg1 < arg0) ? 1 : 0);
@@ -248,24 +296,32 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         break;
       // Boolean
       case Op.Shr:
+        // We pop the top two elements of the stack and push the first shifted right by the second
+        // [b, a] -> [b >> a]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg1 >> arg0);
         i++;
         break;
       case Op.Shl:
+        // We pop the top two elements of the stack and push the first shifted left by the second
+        // [b, a] -> [b << a]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg1 << arg0);
         i++;
         break;
       case Op.Bor:
+        // We pop the top two elements of the stack and push the bitwise or of the two
+        // [b, a] -> [b | a]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg1 | arg0);
         i++;
         break;
       case Op.Band:
+        // We pop the top two elements of the stack and push the bitwise and of the two
+        // [b, a] -> [b & a]
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg1 & arg0);
@@ -273,88 +329,119 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         break;
       // Debug
       case Op.Dump:
+        // We pop the top of the stack and print it
         arg0 = stack.pop();
         console.log(arg0);
         i++;
         break;
       case Op.Comment:
+        // We ignore comments
         i++;
         break;
       // Control flow
       case Op.If:
+        // We pop the top of the stack to use as a condition
         arg0 = stack.pop();
+        // If the condition is false, we jump to the else or end
         if (arg0 == 0) {
           i = rest.jump!;
         } else {
+          // If the condition is true, we continue to the next instruction
           i++;
         }
         break;
       case Op.Else:
+        // We jump to the end
         i = rest.jump!;
         break;
       case Op.While:
+        // We continue to the next instruction
         i++;
         break;
       case Op.Do:
+        // We pop the top of the stack to use as a condition
         arg0 = stack.pop();
+        // If the condition is false, we jump to the instruction after the end
         if (arg0 == 0) {
           i = rest.jump!;
         } else {
+          // If the condition is true, we continue to the next instruction
           i++;
         }
         break;
       case Op.End:
+        // End always jumps, where to is determined by the block kind
+        // See crossRef for the behavior of End
         i = rest.jump!;
         break;
       // Memory
       case Op.Mem:
+        // We push the address of start of the dynamic memory to the stack
         stack.push(runOpts.reservedCap);
         i++;
         break;
       case Op.Load:
+        // We pop the top of the stack and use it as an address to load from
+        // We then push the value at that address to the stack
         arg0 = stack.pop();
         stack.push(mem[arg0]);
         i++;
         break;
       case Op.Store:
+        // We first pop the value to store and then the address to store it at
         arg0 = stack.pop();
         arg1 = stack.pop();
+        // We modify the value to fit in a byte and store it at the address
         mem[arg1] = arg0 & 0xFF;
         i++;
         break;
       // Abstraction
       case Op.ProcDef:
+        // We jump to after the End of the procedure
         i = rest.jump!;
         break;
       case Op.ProcCall:
+        // We check if the procedure stack is overflowing
         if (procStack.length > runOpts.procStackCap) {
           console.error(
             `ERROR: Proc stack overflow at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
           );
           process.exit(1);
         }
+        // We push the address of the next instruction to the procedure stack as a return address
         procStack.push(i + 1);
+        // We jump to the procedure begin
         i = rest.jump!;
         break;
       case Op.ProcBegin:
-        i++; // Ignored in simulation
+        i++; // Ignored in simulation, jump to actual instruction
         break;
       case Op.ProcRet:
+        // We pop the top of the procedure stack as the return address
+        // We then jump to the return address
         i = procStack.pop()!;
         break;
       case Op.Identifier:
+        // Raw identifiers should be resolved before runtime
         console.error(
           `ERROR: Unreachable, all identifiers should be resolved before runtime - ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
         );
         process.exit(1);
         // Syscall
       case Op.Syscall:
+        // We pop the top of the stack as the syscall number
         syscallNum = stack.pop();
+        // We set the variadic arguments array to empty
         argsArray = [];
+        // Depending on the number of arguments required, we pop that many from the stack
+        // We store the popped values in the variadic arguments array
         for (let j = 0; j < rest.value; j++) {
           argsArray.push(stack.pop());
         }
+        // We call the syscall function with the syscall number and the variadic arguments Array
+        // We also pass the memory to the syscall function
         sysCall(syscallNum, argsArray, mem);
+        // We set the stdout and stderr used flags to true if the syscall was a write to those
         if (syscallNum == 1 && argsArray[0] == 1) {
           stdoutUsed = true;
         }
@@ -373,7 +460,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
     await Bun.write(Bun.stderr, "\n");
   }
 
-  console.log("Reserved partition utilization: " + reservedSoFar);
+  console.log("DEBUG: Reserved partition utilization: " + reservedSoFar);
 };
 
 const compile = async (
@@ -933,6 +1020,7 @@ const crossRef = (program: Instruction[]) => {
 };
 
 const escapeString = (str: string): string => {
+  // This is to handle both raw and escaped sequences within the same source
   const escapeMap: Record<string, string> = {
     n: "\n",
     t: "\t",

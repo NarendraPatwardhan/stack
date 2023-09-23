@@ -1,4 +1,5 @@
 import { assert } from "console";
+import { win32 } from "path";
 
 enum Op {
   // Stack manipulation
@@ -35,6 +36,12 @@ enum Op {
   Mem,
   Load,
   Store,
+  // Abstraction
+  ProcDef,
+  ProcCall,
+  ProcBegin,
+  ProcRet,
+  Identifier,
   // Syscall
   Syscall,
   Count,
@@ -71,6 +78,8 @@ const strToOp: Record<string, Op> = {
   "mem": Op.Mem,
   ",": Op.Load,
   ".": Op.Store,
+  // Abstraction
+  "proc": Op.ProcDef,
 };
 
 interface Loc {
@@ -132,13 +141,15 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let reservedSoFar = 0;
   let reservedAddr: Record<string, [number, number]> = {};
 
+  let procStack: number[] = [];
+
   let stdoutUsed = false;
   let stderrUsed = false;
 
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 28,
+      Op.Count == 33,
       "Exhastive handling of operations is expected in simulate",
     );
     const { op, ...rest } = program[i];
@@ -312,7 +323,32 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         mem[arg1] = arg0 & 0xFF;
         i++;
         break;
-      // Syscall
+      // Abstraction
+      case Op.ProcDef:
+        i = rest.jump!;
+        break;
+      case Op.ProcCall:
+        if (procStack.length > runOpts.procStackCap) {
+          console.error(
+            `ERROR: Proc stack overflow at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+          process.exit(1);
+        }
+        procStack.push(i + 1);
+        i = rest.jump!;
+        break;
+      case Op.ProcBegin:
+        i++; // Ignored in simulation
+        break;
+      case Op.ProcRet:
+        i = procStack.pop()!;
+        break;
+      case Op.Identifier:
+        console.error(
+          `ERROR: Unreachable, all identifiers should be resolved before runtime - ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+        );
+        process.exit(1);
+        // Syscall
       case Op.Syscall:
         syscallNum = stack.pop();
         argsArray = [];
@@ -389,13 +425,16 @@ const compile = async (
 
   writer.write("global _start\n");
   writer.write("_start:\n");
+  writer.write("  ;;-- init --\n");
+  writer.write("  mov rax, process_stack_end\n");
+  writer.write("  mov [process_stack_rsp], rax\n");
 
   const end = program.length;
   let i = 0;
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 28,
+      Op.Count == 33,
       "Exhastive handling of operations is expected in compile",
     );
     writer.write("addr_" + i + ":\n");
@@ -620,7 +659,41 @@ const compile = async (
         writer.write("  mov [rax], bl\n");
         i++;
         break;
-      // Syscall
+      // Abstraction
+      case Op.ProcDef:
+        writer.write("  ;;-- proc " + program[i + 1].value + " --\n");
+        writer.write("  jmp addr_" + rest.jump + "\n");
+        i++;
+        break;
+      case Op.ProcCall:
+        writer.write("  ;;-- call " + rest.value + " --\n");
+        writer.write("  mov rax, rsp\n");
+        writer.write("  mov rsp, [process_stack_rsp]\n");
+        writer.write("  call addr_" + rest.jump + "\n");
+        writer.write("  mov [process_stack_rsp], rsp\n");
+        writer.write("  mov rsp, rax\n");
+        i++;
+        break;
+      case Op.ProcBegin:
+        writer.write("  ;;-- proc begin --\n");
+        writer.write("  mov [process_stack_rsp], rsp\n");
+        writer.write("  mov rsp, rax\n");
+        i++;
+        break;
+      case Op.ProcRet:
+        writer.write("  ;;-- proc ret --\n");
+        writer.write("  mov rax, rsp\n");
+        writer.write("  mov rsp, [process_stack_rsp]\n");
+        writer.write("  ret\n");
+        i++;
+        break;
+      case Op.Identifier:
+        console.error(
+          `ERROR: Unreachable, all identifiers should be resolved before runtime - ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+        );
+        process.exit(1);
+
+        // Syscall
       case Op.Syscall:
         writer.write("  ;;-- syscall " + rest.value + " --\n");
         writer.write("  pop rax\n");
@@ -645,6 +718,9 @@ const compile = async (
   }
 
   writer.write("segment .bss\n");
+  writer.write("process_stack_rsp resq 1\n");
+  writer.write("process_stack resb " + runOpts.procStackCap + "\n");
+  writer.write("process_stack_end:\n");
   writer.write("mem resb " + runOpts.memCap + "\n");
 
   writer.end();
@@ -680,9 +756,14 @@ const crossRef = (program: Instruction[]) => {
   let stack = [];
   let start_location: number | undefined;
 
+  let known: Record<string, number> = {};
+  let seen = [];
+
+  let procDefinition = false;
+
   for (const [i, { op, ...rest }] of program.entries()) {
     assert(
-      Op.Count == 28,
+      Op.Count == 33,
       "Exhastive handling of operations is expected in crossref",
     );
     switch (op) {
@@ -734,8 +815,47 @@ const crossRef = (program: Instruction[]) => {
         } else if (program[start_location].op == Op.Do) {
           program[i].jump = program[start_location].jump;
           program[start_location].jump = i + 1;
+        } else if (program[start_location].op == Op.ProcDef) {
+          procDefinition = false;
+          program[start_location].jump = i + 1;
+          program[i].op = Op.ProcRet;
         }
         break;
+      case Op.ProcDef:
+        if (program[i + 1].op != Op.Identifier) {
+          console.error(
+            `ERROR: Proc name must be an unique identifier at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+          process.exit(1);
+        }
+        stack.push(i);
+        const procName = program[i + 1].value;
+        if (procDefinition) {
+          console.error(
+            `ERROR: Nested proc definition at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+          process.exit(1);
+        }
+        procDefinition = true;
+        known[procName] = i + 1;
+        program[i + 1].op = Op.ProcBegin;
+        break;
+      case Op.Identifier:
+        seen.push([rest.value, i, rest.loc]);
+        break;
+    }
+
+    // Check for undefined identifiers
+    for (const [name, i, loc] of seen) {
+      if (!known.hasOwnProperty(name)) {
+        console.error(
+          `ERROR: Undefined identifier ${name} at ${loc.path}:${loc.row}:${loc.col}`,
+        );
+        process.exit(1);
+      } else {
+        program[i].op = Op.ProcCall;
+        program[i].jump = known[name];
+      }
     }
   }
 
@@ -786,7 +906,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 28,
+    Op.Count == 33,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 
@@ -828,15 +948,12 @@ const parseTokenAsIntruction = (
         return { op: Op.NDup, loc, value };
       default:
         console.error(
-          `ERROR: Unknown token ${text} at ${loc.path}:${loc.row}:${loc.col}`,
+          `ERROR: Unknown variadic instruction ${text} at ${loc.path}:${loc.row}:${loc.col}`,
         );
+        process.exit(1);
     }
   }
-
-  console.error(
-    `ERROR: Unknown token ${text} at ${loc.path}:${loc.row}:${loc.col}`,
-  );
-  process.exit(1);
+  return { op: Op.Identifier, loc, value: text };
 };
 
 const incrementCursor = (
@@ -936,14 +1053,17 @@ const loadProgramFromFile = async (path: string) => {
 const usage = () => {
   console.log("Usage: bun run <SUBCOMMAND> [ARGS]");
   console.log("SUBCOMMANDS:");
+  console.log("   scn <file>      Print the program representation");
   console.log("   sim <file>      Simulate the program");
   console.log("   com <file> [out]      Compile the program");
+  console.log("   mix <file> [out]      Simulate and compile the program");
 };
 
 interface RunOptions {
   outPrefix: string;
   reservedCap: number;
   memCap: number;
+  procStackCap: number;
   execute?: boolean;
 }
 
@@ -967,6 +1087,11 @@ const main = async (runOpts: RunOptions) => {
   const file = argv[3];
   const program = await loadProgramFromFile(file);
   switch (subcmd) {
+    case "scn":
+      for (const [i, instr] of program.entries()) {
+        console.log(i + ": " + JSON.stringify(instr));
+      }
+      break;
     case "sim":
       await simulate(program, runOpts);
       break;
@@ -999,6 +1124,7 @@ await main(
     outPrefix: "./build/out",
     reservedCap: 64 * 1024, // 64KB
     memCap: 64 * 1024, // 64KB
+    procStackCap: 1024,
     execute: false,
   },
 );

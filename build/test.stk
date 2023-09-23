@@ -1,6 +1,0 @@
-# A "super" complex comment
-10 0 while (2)dup > do
-"Hello, world \"世界\"!\n" 1 1 (3)syscall
-  1 +
-end
-"Hello, world!\n" 1 1 (3)syscall

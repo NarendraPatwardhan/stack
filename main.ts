@@ -105,6 +105,11 @@ interface Instruction {
   jump?: number;
 }
 
+interface Proc {
+  loc: Loc;
+  jump: number;
+}
+
 interface Macro {
   loc: Loc;
   instrs: Instruction[];
@@ -972,8 +977,6 @@ const preprocess = async (raw: Instruction[]): Promise<Instruction[]> => {
   // The map of identifiers filled after encoutering their definition
   // The value is array of [kind, any] where kind is the operation that defines the identifier
   // and the second value depends on the kind
-  // for procs it is the index of the operation that defines the identifier used for jumping
-  // for macros it is type Macro
   let knownIdentifiers: Record<string, [Op, any]> = {};
 
   // The list of identifiers seen in the program
@@ -1100,8 +1103,9 @@ const preprocess = async (raw: Instruction[]): Promise<Instruction[]> => {
         const procName = next.value;
         // Check that the identifier is not already defined for any abstraction
         if (knownIdentifiers.hasOwnProperty(procName)) {
+          let prev = knownIdentifiers[procName][1].loc;
           console.error(
-            `ERROR: Duplicate identifier ${next.value} at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+            `ERROR: Duplicate identifier ${next.value} at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}, previously defined at ${prev.path}:${prev.row}:${prev.col}`,
           );
         }
         // Push the index of the identifier to the stack to be used with the next end instruction
@@ -1116,7 +1120,11 @@ const preprocess = async (raw: Instruction[]): Promise<Instruction[]> => {
         // Since we are not in nested proc definition, we can set the flag
         procDefinition = true;
         // Add the identifier to the known identifiers map with kind ProcDef and the index of the ProcBegin
-        knownIdentifiers[procName] = [Op.ProcDef, i + 1];
+        let procDef: Proc = {
+          loc: rest.loc,
+          jump: i + 1,
+        };
+        knownIdentifiers[procName] = [Op.ProcDef, procDef];
         // Change the next operation from identifier to ProcBegin
         next.op = Op.ProcBegin;
         break;
@@ -1152,8 +1160,9 @@ const preprocess = async (raw: Instruction[]): Promise<Instruction[]> => {
         const macroName = next.value;
         // We check if the macro is already defined
         if (knownIdentifiers.hasOwnProperty(macroName)) {
+          let prev = knownIdentifiers[macroName][1].loc;
           console.error(
-            `ERROR: Duplicate identifier ${next.value} at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+            `ERROR: Duplicate identifier ${next.value} at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}, previously defined at ${prev.path}:${prev.row}:${prev.col}`,
           );
         }
         let macro: Macro = {
@@ -1229,13 +1238,13 @@ const preprocess = async (raw: Instruction[]): Promise<Instruction[]> => {
       process.exit(1);
     } else {
       // Since we know the identifier, we can replace it with the correct operation
-      let [kind, jump] = knownIdentifiers[name];
+      let [kind, proc] = knownIdentifiers[name];
       switch (kind) {
         case Op.ProcDef:
           // Since we know the identifier from ProcDef, we replace this instruction with ProcCall
           program[i].op = Op.ProcCall;
           // We also set the jump to the index of the ProcBegin
-          program[i].jump = jump;
+          program[i].jump = proc.jump;
           break;
         case Op.MacroDef:
           // Current macros are not allowed to be used before definition

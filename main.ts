@@ -1,5 +1,4 @@
 import { assert } from "console";
-import { argv0 } from "process";
 
 enum Op {
   // Stack manipulation
@@ -98,6 +97,10 @@ interface Instruction {
   loc: Loc;
   value?: any;
   jump?: number;
+}
+
+interface Macro {
+  instrs: Instruction[];
 }
 
 const sysCall = async (num: number, args: any[], mem: Uint8Array) => {
@@ -527,10 +530,10 @@ const compile = async (
 
   // Need better explnation of this but we basically tell where dynamic memory starts
   // We first mov the address of the end of the reserved memory to rax
-  // We then mov this value from rax to the process_stack_rsp pointer
+  // We then mov this value from rax to the proc_stack_rsp pointer
   writer.write("  ;;-- init --\n");
-  writer.write("  mov rax, process_stack_end\n");
-  writer.write("  mov [process_stack_rsp], rax\n");
+  writer.write("  mov rax, proc_stack_end\n");
+  writer.write("  mov [proc_stack_rsp], rax\n");
 
   // This begins the actual source code transpilation
   // For any undocumented stack operations, see the simulation case
@@ -796,22 +799,22 @@ const compile = async (
       case Op.ProcCall:
         writer.write("  ;;-- call " + rest.value + " --\n");
         writer.write("  mov rax, rsp\n");
-        writer.write("  mov rsp, [process_stack_rsp]\n");
+        writer.write("  mov rsp, [proc_stack_rsp]\n");
         writer.write("  call addr_" + rest.jump + "\n");
-        writer.write("  mov [process_stack_rsp], rsp\n");
+        writer.write("  mov [proc_stack_rsp], rsp\n");
         writer.write("  mov rsp, rax\n");
         i++;
         break;
       case Op.ProcBegin:
         writer.write("  ;;-- proc begin --\n");
-        writer.write("  mov [process_stack_rsp], rsp\n");
+        writer.write("  mov [proc_stack_rsp], rsp\n");
         writer.write("  mov rsp, rax\n");
         i++;
         break;
       case Op.ProcRet:
         writer.write("  ;;-- proc ret --\n");
         writer.write("  mov rax, rsp\n");
-        writer.write("  mov rsp, [process_stack_rsp]\n");
+        writer.write("  mov rsp, [proc_stack_rsp]\n");
         writer.write("  ret\n");
         i++;
         break;
@@ -855,11 +858,11 @@ const compile = async (
   // The bss segment contains runtime objects
   writer.write("segment .bss\n");
   // We first reserve the memory for the process stack pointer
-  writer.write("process_stack_rsp resq 1\n");
+  writer.write("proc_stack_rsp resq 1\n");
   // We then reserve the memory for the process stack
-  writer.write("process_stack resb " + runOpts.procStackCap + "\n");
+  writer.write("proc_stack resb " + runOpts.procStackCap + "\n");
   // We mark the end of the process stack as label to signify the start of the dynamic memory
-  writer.write("process_stack_end:\n");
+  writer.write("proc_stack_end:\n");
   // We reserve the memory for the dynamic memory
   writer.write("mem resb " + runOpts.memCap + "\n");
 
@@ -893,15 +896,56 @@ const compile = async (
   }
 };
 
-const crossRef = (program: Instruction[]) => {
+const escapeString = (str: string): string => {
+  // This is to handle both raw and escaped sequences within the same source
+  const escapeMap: Record<string, string> = {
+    n: "\n",
+    t: "\t",
+    "\\": "\\",
+    '"': '"',
+  };
+
+  let out = "";
+  let i = 0;
+
+  while (i < str.length) {
+    if (str[i] === "\\") {
+      const escapeChar = str[i + 1];
+
+      if (escapeMap.hasOwnProperty(escapeChar)) {
+        out += escapeMap[escapeChar];
+        i += 2;
+      } else {
+        console.error(
+          `ERROR: Unknown escape sequence \\${escapeChar} in string ${str}`,
+        );
+        process.exit(1);
+      }
+    } else {
+      out += str[i];
+      i++;
+    }
+  }
+
+  return out;
+};
+
+// For macro/constants
+const preprocess = (raw: Instruction[]): Instruction[] => {
+  let program: Instruction[] = [];
+  // We reverse the instructions to make it O(1) to pop them in order they were written
+  raw.reverse();
+
   // The stack of indexes of any operations that start a block
-  let stack = [];
+  let crossRefStack = [];
+
   // The index of the operation that starts the block
   let start_location: number | undefined;
 
   // The map of identifiers filled after encoutering their definition
   // The value is array of [kind, jump] where kind is the operation that defines the identifier
-  // and jump is the index of the operation that defines the identifier
+  // and the second value depends on the kind
+  // for procs it is the index of the operation that defines the identifier used for jumping
   let knownIdentifiers: Record<string, [Op, number]> = {};
 
   // The list of identifiers seen in the program
@@ -910,38 +954,45 @@ const crossRef = (program: Instruction[]) => {
   // Flag to check if we are in a proc definition to prevent nested proc definitions
   let procDefinition = false;
 
-  for (const [i, { op, ...rest }] of program.entries()) {
+  // The intruction pointer to keep track of the current instruction
+  let i = 0;
+  // We iterate over the instructions till the array is empty
+  while (raw.length > 0) {
     assert(
       Op.Count == 33,
-      "Exhastive handling of operations is expected in crossref",
+      "Exhastive handling of operations is expected in preprocessing",
     );
+    let { op, ...rest } = raw.pop()!;
+    program.push({ op, ...rest });
     switch (op) {
       case Op.If:
         // Push the index of the if instruction to the stack to be used with the next else or end instruction
-        stack.push(i);
+        crossRefStack.push(i);
         break;
       case Op.Else:
         // Pop the index of the if instruction from the stack
-        let if_location = stack.pop();
+        start_location = crossRefStack.pop()!;
         // Check if the instruction is of kind if, otherwise it is an unmatched else, so we exit
-        if (if_location == undefined || program[if_location].op != Op.If) {
+        if (
+          start_location == undefined || program[start_location].op != Op.If
+        ) {
           console.error(
             `ERROR: Unmatched else at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
           );
           process.exit(1);
         }
         // Set the jump of corresponding if instruction to the index after the else instruction
-        program[if_location].jump = i + 1;
+        program[start_location].jump = i + 1;
         // Since now else needs closing, we push the index of the else instruction to the stack to be used with the next end instruction
-        stack.push(i);
+        crossRefStack.push(i);
         break;
       case Op.While:
         // Push the index of the while instruction to the stack to be used with the next do and end instruction
-        stack.push(i);
+        crossRefStack.push(i);
         break;
       case Op.Do:
         // Pop the index of the while instruction from the stack
-        start_location = stack.pop();
+        start_location = crossRefStack.pop();
         // Check if the instruction is of kind while, otherwise it is an unmatched do, so we exit
         if (
           start_location == undefined ||
@@ -956,11 +1007,11 @@ const crossRef = (program: Instruction[]) => {
         // This is to store it for the end instruction, since do does not jump to while
         // Do jumps either to the next instruction or to the instruction after the end
         program[i].jump = start_location;
-        stack.push(i);
+        crossRefStack.push(i);
         break;
       case Op.End:
         // Pop the index of the start of the block from the stack
-        start_location = stack.pop();
+        start_location = crossRefStack.pop()!;
         // If we are not in a block, then it is an unmatched end, so we exit
         if (start_location == undefined) {
           console.error(
@@ -1004,24 +1055,23 @@ const crossRef = (program: Instruction[]) => {
         }
         break;
       case Op.ProcDef:
+        const next = raw[raw.length - 1];
         // Check that the next instruction is an identifier
-        if (program[i + 1].op != Op.Identifier) {
+        if (next.op != Op.Identifier) {
           console.error(
             `ERROR: Proc name must be identifier at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
           );
           process.exit(1);
         }
-        const procName = program[i + 1].value;
+        const procName = next.value;
         // Check that the identifier is not already defined for any abstraction
         if (knownIdentifiers.hasOwnProperty(procName)) {
           console.error(
-            `ERROR: Duplicate identifier ${
-              program[i + 1].value
-            } at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+            `ERROR: Duplicate identifier ${next.value} at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
           );
         }
         // Push the index of the identifier to the stack to be used with the next end instruction
-        stack.push(i);
+        crossRefStack.push(i);
         // Check if we are already in a proc definition, we don't support nested procs
         if (procDefinition) {
           console.error(
@@ -1034,78 +1084,50 @@ const crossRef = (program: Instruction[]) => {
         // Add the identifier to the known identifiers map with kind ProcDef and the index of the ProcBegin
         knownIdentifiers[procName] = [Op.ProcDef, i + 1];
         // Change the next operation from identifier to ProcBegin
-        program[i + 1].op = Op.ProcBegin;
+        next.op = Op.ProcBegin;
         break;
       case Op.Identifier:
         // Push the raw text, index and location of the identifier to the seen list
         seenIdentifiers.push([rest.value, i, rest.loc]);
         break;
+      default:
+        break;
     }
 
-    // Check for undefined identifiers
-    for (const [name, i, loc] of seenIdentifiers) {
-      if (!knownIdentifiers.hasOwnProperty(name)) {
-        console.error(
-          `ERROR: Undefined identifier ${name} at ${loc.path}:${loc.row}:${loc.col}`,
-        );
-        process.exit(1);
-      } else {
-        // Since we know the identifier, we can replace it with the correct operation
-        let [kind, jump] = knownIdentifiers[name];
-        switch (kind) {
-          case Op.ProcDef:
-            // Since we know the identifier from ProcDef, we replace this instruction with ProcCall
-            program[i].op = Op.ProcCall;
-            // We also set the jump to the index of the ProcBegin
-            program[i].jump = jump;
-            break;
-        }
+    i++;
+  }
+
+  // Check for undefined identifiers
+  for (const [name, i, loc] of seenIdentifiers) {
+    if (!knownIdentifiers.hasOwnProperty(name)) {
+      console.error(
+        `ERROR: Undefined identifier ${name} at ${loc.path}:${loc.row}:${loc.col}`,
+      );
+      process.exit(1);
+    } else {
+      // Since we know the identifier, we can replace it with the correct operation
+      let [kind, jump] = knownIdentifiers[name];
+      switch (kind) {
+        case Op.ProcDef:
+          // Since we know the identifier from ProcDef, we replace this instruction with ProcCall
+          program[i].op = Op.ProcCall;
+          // We also set the jump to the index of the ProcBegin
+          program[i].jump = jump;
+          break;
       }
     }
   }
 
-  if (stack.length > 0) {
+  if (crossRefStack.length > 0) {
+    i = crossRefStack.pop()!;
+    const { op, ...rest } = program[i];
     console.error(
-      "ERROR: One or more blocks are not closed with end instructions",
+      `ERROR: Unclosed block started with ${op} at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
     );
     process.exit(1);
   }
 
   return program;
-};
-
-const escapeString = (str: string): string => {
-  // This is to handle both raw and escaped sequences within the same source
-  const escapeMap: Record<string, string> = {
-    n: "\n",
-    t: "\t",
-    "\\": "\\",
-    '"': '"',
-  };
-
-  let out = "";
-  let i = 0;
-
-  while (i < str.length) {
-    if (str[i] === "\\") {
-      const escapeChar = str[i + 1];
-
-      if (escapeMap.hasOwnProperty(escapeChar)) {
-        out += escapeMap[escapeChar];
-        i += 2;
-      } else {
-        console.error(
-          `ERROR: Unknown escape sequence \\${escapeChar} in string ${str}`,
-        );
-        process.exit(1);
-      }
-    } else {
-      out += str[i];
-      i++;
-    }
-  }
-
-  return out;
 };
 
 const parseTokenAsIntruction = (
@@ -1188,7 +1210,7 @@ const collectChars = (
   return [cur, row, col];
 };
 
-const lexFile = async (path: string) => {
+const lexFile = async (path: string): Promise<Token[]> => {
   // We first read the file into a string
   const file = Bun.file(path);
   const text = await file.text();
@@ -1261,8 +1283,8 @@ const loadProgramFromFile = async (path: string) => {
   const lexed = await lexFile(path);
   // Then we parse the tokens into instructions
   const program = lexed.map(parseTokenAsIntruction);
-  // Then we cross reference the instructions to resolve identifiers and blocks
-  return crossRef(program);
+  // Then we preprocess the instructions to resolve identifiers and blocks as well as resolve macros
+  return preprocess(program);
 };
 
 const usage = () => {

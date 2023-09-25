@@ -9,6 +9,6 @@ mem 1 + dup , 1 + .
 mem 2 + dup , 1 + .
 
 # Should print 98\n99\n100
-mem 0 + , dump
-mem 1 + , dump
-mem 2 + , dump
+mem 0 + , print 
+mem 1 + , print 
+mem 2 + , print 

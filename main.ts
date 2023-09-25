@@ -26,7 +26,7 @@ enum Op {
   Bor,
   Band,
   // Debug
-  Dump,
+  Print,
   Comment,
   // Control flow
   If,
@@ -75,7 +75,7 @@ const strToOp: Record<string, Op> = {
   "bor": Op.Bor,
   "band": Op.Band,
   // Debug
-  "dump": Op.Dump,
+  "print": Op.Print,
   // Control flow
   "if": Op.If,
   "else": Op.Else,
@@ -373,7 +373,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         i++;
         break;
       // Debug
-      case Op.Dump:
+      case Op.Print:
         // We pop the top of the stack and print it
         arg0 = stack.pop();
         console.log(arg0);
@@ -539,9 +539,9 @@ const compile = async (
   const writer = file.writer();
 
   // We write the assembly preamble
-  // This part is for debugging purposes and supports the dump operation
+  // This part is for debugging purposes and supports the print operation
   writer.write("segment .text\n");
-  writer.write("dump:\n");
+  writer.write("print:\n");
   writer.write("  mov     r9, -3689348814741910323\n");
   writer.write("  sub     rsp, 40\n");
   writer.write("  mov     BYTE [rsp+31], 10\n");
@@ -830,10 +830,10 @@ const compile = async (
         i++;
         break;
       // Debug
-      case Op.Dump:
-        writer.write("  ;;-- dump --\n");
+      case Op.Print:
+        writer.write("  ;;-- print --\n");
         writer.write("  pop rdi\n");
-        writer.write("  call dump\n");
+        writer.write("  call print\n");
         i++;
         break;
       case Op.Comment:

@@ -43,7 +43,6 @@ enum Op {
   Identifier,
   // Comptime
   MacroDef,
-  MacroExp,
   // Syscall
   Syscall,
   Count,
@@ -170,7 +169,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 35,
+      Op.Count == 34,
       "Exhastive handling of operations is expected in simulate",
     );
     // We destructure the instruction into op and rest
@@ -552,7 +551,7 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 35,
+      Op.Count == 34,
       "Exhastive handling of operations is expected in compile",
     );
     // We create a label for the current instruction
@@ -978,7 +977,7 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
   // We iterate over the instructions till the array is empty
   while (raw.length > 0) {
     assert(
-      Op.Count == 35,
+      Op.Count == 34,
       "Exhastive handling of operations is expected in preprocessing",
     );
     let { op, ...rest } = raw.pop()!;
@@ -1117,8 +1116,6 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
           knownIdentifiers.hasOwnProperty(rest.value) &&
           knownIdentifiers[rest.value][0] == Op.MacroDef
         ) {
-          // Change the current operation from identifier to MacroExp
-          op = Op.MacroExp;
           // Append the instructions of the macro to the push list
           push = push.concat(knownIdentifiers[rest.value][1].instrs);
         } else {
@@ -1229,7 +1226,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 35,
+    Op.Count == 34,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 

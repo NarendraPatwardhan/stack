@@ -13,6 +13,9 @@ enum Op {
   // Arithmetic
   Plus,
   Minus,
+  Mul,
+  Div,
+  Mod,
   // Logic
   Equal,
   Gt,
@@ -59,6 +62,9 @@ const strToOp: Record<string, Op> = {
   // Arithmetic
   "+": Op.Plus,
   "-": Op.Minus,
+  "*": Op.Mul,
+  "/": Op.Div,
+  "%": Op.Mod,
   // Logic
   "=": Op.Equal,
   ">": Op.Gt,
@@ -176,7 +182,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 35,
+      Op.Count == 38,
       "Exhastive handling of operations is expected in simulate",
     );
     // We destructure the instruction into op and rest
@@ -282,6 +288,30 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         arg0 = stack.pop();
         arg1 = stack.pop();
         stack.push(arg1 - arg0);
+        i++;
+        break;
+      case Op.Mul:
+        // We pop the top two elements of the stack and push their product
+        // [b, a] -> [b * a]
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 * arg0);
+        i++;
+        break;
+      case Op.Div:
+        // We pop the top two elements of the stack and push their quotient (this is Integer division)
+        // [b, a] -> [b / a]
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 / arg0);
+        i++;
+        break;
+      case Op.Mod:
+        // We pop the top two elements of the stack and push their remainder (this is Integer division)
+        // [b, a] -> [b % a]
+        arg0 = stack.pop();
+        arg1 = stack.pop();
+        stack.push(arg1 % arg0);
         i++;
         break;
       // Logic
@@ -562,7 +592,7 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 35,
+      Op.Count == 38,
       "Exhastive handling of operations is expected in compile",
     );
     // We create a label for the current instruction
@@ -671,6 +701,32 @@ const compile = async (
         writer.write("  pop rbx\n");
         writer.write("  sub rbx, rax\n");
         writer.write("  push rbx\n");
+        i++;
+        break;
+      case Op.Mul:
+        writer.write("  ;;-- mul --\n");
+        writer.write("  pop rax\n");
+        writer.write("  pop rbx\n");
+        writer.write("  mul rbx\n");
+        writer.write("  push rax\n");
+        i++;
+        break;
+      case Op.Div:
+        writer.write("  ;;-- div --\n");
+        writer.write("  xor rdx, rdx\n");
+        writer.write("  pop rbx\n");
+        writer.write("  pop rax\n");
+        writer.write("  div rbx\n");
+        writer.write("  push rax\n");
+        i++;
+        break;
+      case Op.Mod:
+        writer.write("  ;;-- mod --\n");
+        writer.write("  xor rdx, rdx\n");
+        writer.write("  pop rbx\n");
+        writer.write("  pop rax\n");
+        writer.write("  div rbx\n");
+        writer.write("  push rdx\n");
         i++;
         break;
       // Logic
@@ -990,7 +1046,7 @@ const preprocess = async (raw: Instruction[]): Promise<Instruction[]> => {
   // We iterate over the instructions till the array is empty
   while (raw.length > 0) {
     assert(
-      Op.Count == 35,
+      Op.Count == 38,
       "Exhastive handling of operations is expected in preprocessing",
     );
     let { op, ...rest } = raw.pop()!;
@@ -1275,7 +1331,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 35,
+    Op.Count == 38,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 

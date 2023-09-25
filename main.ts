@@ -43,6 +43,7 @@ enum Op {
   Identifier,
   // Comptime
   MacroDef,
+  Import,
   // Syscall
   Syscall,
   Count,
@@ -83,6 +84,7 @@ const strToOp: Record<string, Op> = {
   "proc": Op.ProcDef,
   // Comptime
   "macro": Op.MacroDef,
+  "import": Op.Import,
 };
 
 interface Loc {
@@ -169,7 +171,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 34,
+      Op.Count == 35,
       "Exhastive handling of operations is expected in simulate",
     );
     // We destructure the instruction into op and rest
@@ -439,6 +441,10 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         // Ignored in simulation
         i++;
         break;
+      case Op.Import:
+        // Ignored in simulation
+        i++;
+        break;
         // Syscall
       case Op.Syscall:
         // We pop the top of the stack as the syscall number
@@ -551,7 +557,7 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 34,
+      Op.Count == 35,
       "Exhastive handling of operations is expected in compile",
     );
     // We create a label for the current instruction
@@ -836,6 +842,10 @@ const compile = async (
         // Ignored in compilation
         i++;
         break;
+      case Op.Import:
+        // Ignored in compilation
+        i++;
+        break;
         // Syscall
       case Op.Syscall:
         writer.write("  ;;-- syscall " + rest.value + " --\n");
@@ -943,7 +953,7 @@ const escapeString = (str: string): string => {
 };
 
 // For macro/constants
-const preprocess = (raw: Instruction[]): Instruction[] => {
+const preprocess = async (raw: Instruction[]): Promise<Instruction[]> => {
   let program: Instruction[] = [];
   // We reverse the instructions to make it O(1) to pop them in order they were written
   raw.reverse();
@@ -977,7 +987,7 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
   // We iterate over the instructions till the array is empty
   while (raw.length > 0) {
     assert(
-      Op.Count == 34,
+      Op.Count == 35,
       "Exhastive handling of operations is expected in preprocessing",
     );
     let { op, ...rest } = raw.pop()!;
@@ -1168,6 +1178,36 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
           );
         }
         knownIdentifiers[macroName] = [Op.MacroDef, macro];
+        break;
+      case Op.Import:
+        // We first check if the next instruction exists
+        if (raw.length == 0) {
+          console.error(
+            `ERROR: Empty import statement at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+          process.exit(1);
+        }
+        // We pop the next instruction and check if it is push string
+        next = raw.pop()!;
+        if (next.op != Op.PushStr) {
+          console.error(
+            `ERROR: Import path must be string at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+          process.exit(1);
+        }
+        let rawImport: Token[] = [];
+        try {
+          rawImport = await lexFile(next.value);
+        } catch (e) {
+          console.error(
+            `ERROR: Failed to import file ${next.value} at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+          process.exit(1);
+        }
+        // We read the file and lex it
+        const imported = rawImport.map(parseTokenAsIntruction);
+        // We then append the imported instructions to the raw instructions
+        raw = raw.concat(imported.reverse());
     }
 
     if (push.length > 0) {
@@ -1226,7 +1266,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 34,
+    Op.Count == 35,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 

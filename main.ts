@@ -41,6 +41,9 @@ enum Op {
   ProcBegin,
   ProcRet,
   Identifier,
+  // Comptime
+  MacroDef,
+  MacroExp,
   // Syscall
   Syscall,
   Count,
@@ -79,6 +82,8 @@ const strToOp: Record<string, Op> = {
   ".": Op.Store,
   // Abstraction
   "proc": Op.ProcDef,
+  // Comptime
+  "macro": Op.MacroDef,
 };
 
 interface Loc {
@@ -100,6 +105,7 @@ interface Instruction {
 }
 
 interface Macro {
+  loc: Loc;
   instrs: Instruction[];
 }
 
@@ -164,7 +170,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 33,
+      Op.Count == 35,
       "Exhastive handling of operations is expected in simulate",
     );
     // We destructure the instruction into op and rest
@@ -430,6 +436,10 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
           `ERROR: Unreachable, all identifiers should be resolved before runtime - ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
         );
         process.exit(1);
+      case Op.MacroDef:
+        // Ignored in simulation
+        i++;
+        break;
         // Syscall
       case Op.Syscall:
         // We pop the top of the stack as the syscall number
@@ -542,7 +552,7 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 33,
+      Op.Count == 35,
       "Exhastive handling of operations is expected in compile",
     );
     // We create a label for the current instruction
@@ -823,7 +833,10 @@ const compile = async (
           `ERROR: Unreachable, all identifiers should be resolved before runtime - ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
         );
         process.exit(1);
-
+      case Op.MacroDef:
+        // Ignored in compilation
+        i++;
+        break;
         // Syscall
       case Op.Syscall:
         writer.write("  ;;-- syscall " + rest.value + " --\n");
@@ -942,11 +955,17 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
   // The index of the operation that starts the block
   let start_location: number | undefined;
 
+  // The next instruction for identifier lookahead
+  let next: Instruction;
+
+  let push: Instruction[] = [];
+
   // The map of identifiers filled after encoutering their definition
-  // The value is array of [kind, jump] where kind is the operation that defines the identifier
+  // The value is array of [kind, any] where kind is the operation that defines the identifier
   // and the second value depends on the kind
   // for procs it is the index of the operation that defines the identifier used for jumping
-  let knownIdentifiers: Record<string, [Op, number]> = {};
+  // for macros it is type Macro
+  let knownIdentifiers: Record<string, [Op, any]> = {};
 
   // The list of identifiers seen in the program
   let seenIdentifiers = [];
@@ -959,11 +978,10 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
   // We iterate over the instructions till the array is empty
   while (raw.length > 0) {
     assert(
-      Op.Count == 33,
+      Op.Count == 35,
       "Exhastive handling of operations is expected in preprocessing",
     );
     let { op, ...rest } = raw.pop()!;
-    program.push({ op, ...rest });
     switch (op) {
       case Op.If:
         // Push the index of the if instruction to the stack to be used with the next else or end instruction
@@ -1006,7 +1024,7 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
         // Set the jump of current do instruction to the index of the while instruction
         // This is to store it for the end instruction, since do does not jump to while
         // Do jumps either to the next instruction or to the instruction after the end
-        program[i].jump = start_location;
+        rest.jump = start_location;
         crossRefStack.push(i);
         break;
       case Op.End:
@@ -1027,12 +1045,12 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
           program[start_location].jump = i;
           // We also set the jump of the current end to the next instruction
           // This is used immediately as end always jumps
-          program[i].jump = i + 1;
+          rest.jump = i + 1;
         } else if (corrOp == Op.Do) {
           // If the corresponding operation is Do, then we need to jump to the paired While instruction
           // We obtain the index of While stored within the Do instruction and set it
           // This is used immediately as End always jumps
-          program[i].jump = program[start_location].jump;
+          rest.jump = program[start_location].jump;
           // But the Do instruction needs to exit the loop if condition is false
           // So now we set the jump of corresponding Do instruction to the next index after current End
           program[start_location].jump = i + 1;
@@ -1044,7 +1062,7 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
           program[start_location].jump = i + 1;
           // However when the ProcCall procedure is used, we need to change the behavior of End
           // So we simply replace the current End instruction with ProcRet
-          program[i].op = Op.ProcRet;
+          op = Op.ProcRet;
         } else {
           console.error(
             `ERROR: Unreachable end started with ${
@@ -1055,7 +1073,14 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
         }
         break;
       case Op.ProcDef:
-        const next = raw[raw.length - 1];
+        // We first check if the next instruction exists
+        if (raw.length == 0) {
+          console.error(
+            `ERROR: Empty proc definition at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+          process.exit(1);
+        }
+        next = raw[raw.length - 1];
         // Check that the next instruction is an identifier
         if (next.op != Op.Identifier) {
           console.error(
@@ -1087,14 +1112,75 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
         next.op = Op.ProcBegin;
         break;
       case Op.Identifier:
-        // Push the raw text, index and location of the identifier to the seen list
-        seenIdentifiers.push([rest.value, i, rest.loc]);
+        // Check if the identifier is a macro
+        if (
+          knownIdentifiers.hasOwnProperty(rest.value) &&
+          knownIdentifiers[rest.value][0] == Op.MacroDef
+        ) {
+          // Change the current operation from identifier to MacroExp
+          op = Op.MacroExp;
+          // Append the instructions of the macro to the push list
+          push = push.concat(knownIdentifiers[rest.value][1].instrs);
+        } else {
+          // Push the raw text, index and location of the identifier to the seen list
+          seenIdentifiers.push([rest.value, i, rest.loc]);
+        }
         break;
-      default:
-        break;
+      case Op.MacroDef:
+        // We first check if the next instruction exists
+        if (raw.length == 0) {
+          console.error(
+            `ERROR: Empty macro definition at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+          process.exit(1);
+        }
+        // We pop the next instruction and check if it is an identifier
+        next = raw.pop()!;
+        if (next.op != Op.Identifier) {
+          console.error(
+            `ERROR: Macro name must be identifier at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+          process.exit(1);
+        }
+        const macroName = next.value;
+        // We check if the macro is already defined
+        if (knownIdentifiers.hasOwnProperty(macroName)) {
+          console.error(
+            `ERROR: Duplicate identifier ${next.value} at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+        }
+        let macro: Macro = {
+          loc: rest.loc,
+          instrs: [],
+        };
+
+        macro.instrs = [];
+        while (raw.length > 0) {
+          // We pop the next instruction
+          next = raw.pop()!;
+          // If the next instruction is End, we break
+          if (next.op == Op.End) {
+            break;
+          }
+          // Otherwise we add the instruction to the macro
+          macro.instrs.push(next);
+        }
+        if (next.op != Op.End) {
+          console.error(
+            `ERROR: Unclosed macro definition at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+        }
+        knownIdentifiers[macroName] = [Op.MacroDef, macro];
     }
 
-    i++;
+    if (push.length > 0) {
+      program = program.concat(push);
+      i += push.length;
+      push = [];
+    } else {
+      program.push({ op, ...rest });
+      i++;
+    }
   }
 
   // Check for undefined identifiers
@@ -1114,6 +1200,15 @@ const preprocess = (raw: Instruction[]): Instruction[] => {
           // We also set the jump to the index of the ProcBegin
           program[i].jump = jump;
           break;
+        case Op.MacroDef:
+          // Current macros are not allowed to be used before definition
+          // To allow for this, we would need to do another pass before this one
+          // The new pass would need to be after raw tokens but before converting to instructions
+          // If implemented, rename this pass to linkInstructions and the one befpre to resolveStatic
+          console.error(
+            `ERROR: Macro ${name} used before definition at ${loc.path}:${loc.row}:${loc.col}`,
+          );
+          process.exit(1);
       }
     }
   }
@@ -1134,7 +1229,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 33,
+    Op.Count == 35,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 
@@ -1283,7 +1378,7 @@ const loadProgramFromFile = async (path: string) => {
   const lexed = await lexFile(path);
   // Then we parse the tokens into instructions
   const program = lexed.map(parseTokenAsIntruction);
-  // Then we preprocess the instructions to resolve identifiers and blocks as well as resolve macros
+  // Then we preprocess the instructions to resolve identifiers, macros and blocks
   return preprocess(program);
 };
 

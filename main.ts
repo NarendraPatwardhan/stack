@@ -27,6 +27,7 @@ enum Op {
   Band,
   // Debug
   Print,
+  Here,
   Comment,
   // Control flow
   If,
@@ -76,6 +77,7 @@ const strToOp: Record<string, Op> = {
   "band": Op.Band,
   // Debug
   "print": Op.Print,
+  "here": Op.Here,
   // Control flow
   "if": Op.If,
   "else": Op.Else,
@@ -182,7 +184,7 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
   let i = 0;
   while (i < program.length) {
     assert(
-      Op.Count == 38,
+      Op.Count == 39,
       "Exhastive handling of operations is expected in simulate",
     );
     // We destructure the instruction into op and rest
@@ -379,6 +381,11 @@ const simulate = async (program: Instruction[], runOpts: RunOptions) => {
         console.log(arg0);
         i++;
         break;
+      case Op.Here:
+        console.error(
+          `ERROR: All here instructions should be resolved before runtime - ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+        );
+        process.exit(1);
       case Op.Comment:
         // We ignore comments
         i++;
@@ -592,7 +599,7 @@ const compile = async (
   while (i < end) {
     const { op, ...rest } = program[i];
     assert(
-      Op.Count == 38,
+      Op.Count == 39,
       "Exhastive handling of operations is expected in compile",
     );
     // We create a label for the current instruction
@@ -836,6 +843,11 @@ const compile = async (
         writer.write("  call print\n");
         i++;
         break;
+      case Op.Here:
+        console.error(
+          `ERROR: Unreachable, all here instructions should be resolved before runtime - ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+        );
+        process.exit(1);
       case Op.Comment:
         writer.write("  ;;-- " + rest.value + " --\n");
         i++;
@@ -1046,7 +1058,7 @@ const preprocess = async (raw: Instruction[]): Promise<Instruction[]> => {
   // We iterate over the instructions till the array is empty
   while (raw.length > 0) {
     assert(
-      Op.Count == 38,
+      Op.Count == 39,
       "Exhastive handling of operations is expected in preprocessing",
     );
     let { op, ...rest } = raw.pop()!;
@@ -1139,6 +1151,11 @@ const preprocess = async (raw: Instruction[]): Promise<Instruction[]> => {
           );
           process.exit(1);
         }
+        break;
+      case Op.Here:
+        // We replace the Here instruction with PushStr instruction with value of loc
+        op = Op.PushStr;
+        rest.value = `${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`;
         break;
       case Op.ProcDef:
         // We first check if the next instruction exists
@@ -1331,7 +1348,7 @@ const parseTokenAsIntruction = (
   token: Token,
 ): Instruction => {
   assert(
-    Op.Count == 38,
+    Op.Count == 39,
     "Exhastive handling of operations is expected in parsing tokens",
   );
 

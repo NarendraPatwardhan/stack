@@ -1,0 +1,17 @@
+import "std.stk"
+
+macro OP_PUSH_INT 0 end
+macro OP_PLUS 1 end
+macro OP_PRINT 2 end
+
+# struct Op {type: u64, operand:u64}
+macro ops_cound mem end
+macro ops mem 8 + end
+
+proc push_op
+  drop drop 
+  here eputs ": TODO: Not implemented yet\n" eputs
+  STATUS_ERROR exit 
+end
+
+push_op

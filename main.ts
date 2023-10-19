@@ -1259,6 +1259,16 @@ const preprocess = async (raw: Instruction[]): Promise<Instruction[]> => {
             `ERROR: Unclosed macro definition at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
           );
         }
+
+        if (
+          next.op == Op.Identifier || next.op == Op.MacroDef ||
+          next.op == Op.ProcDef
+        ) {
+          console.error(
+            `ERROR: Macro definitions should only contain flat operations at ${rest.loc.path}:${rest.loc.row}:${rest.loc.col}`,
+          );
+        }
+
         knownIdentifiers[macroName] = [Op.MacroDef, macro];
         break;
       case Op.Import:
